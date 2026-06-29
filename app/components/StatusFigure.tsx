@@ -1,64 +1,29 @@
-// an ORIGINAL pixel-art operative sprite (no Bethesda assets) — a grid of squares
-// forming a helmeted figure with a visor + boots, tinted by readiness (green=
-// recovered, amber=fair, red=strained), flanked by limb-indicator callouts. the
-// chest heart pixel pulses at the actual heart rate and shifts color by HR.
+// the STATUS centerpiece: the same phosphor operative from the boot screen, with
+// the live vitals pinned around it (HEART/TEMP left, HRV/SpO2 right). the figure
+// gently pulses at the actual heart rate so it reads as "alive". temp is shown in
+// Fahrenheit. the art is assets/character.png (baked phosphor-green, so no flat
+// tint — see BootSequence for the bake notes).
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  useAnimatedProps,
+  useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { G, Rect } from 'react-native-svg';
-import { colors, font, fonts, scoreColor } from '../theme';
+import { cToF } from '../lib/units';
+import { colors, font, fonts } from '../theme';
 
-const AnimatedG = Animated.createAnimatedComponent(G);
-const CELL = 9;
-
-// '@' head, '#' body, '-' dark detail (visor slit). 14 cols x 17 rows.
-const SPRITE = [
-  '....@@@@@@....',
-  '...@@@@@@@@...',
-  '...@------@...',
-  '...@@@@@@@@...',
-  '....@@@@@@....',
-  '.....####.....',
-  '..##########..',
-  '.############.',
-  '.############.',
-  '.############.',
-  '..##########..',
-  '...########...',
-  '...##....##...',
-  '...##....##...',
-  '...##....##...',
-  '...##....##...',
-  '..###....###..',
-];
-const COLS = 14;
-const ROWS = SPRITE.length;
-
-// per-glyph fill opacity, for a little depth
-const OPACITY: Record<string, number> = { '@': 1, '#': 0.85, '-': 0.28 };
-
-// heart pixels (a small plus) at the chest, viewer-right of center (person's left)
-const HEART_CELLS: [number, number][] = [[8, 8], [7, 9], [8, 9], [9, 9], [8, 10]];
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 const fmt = (v: number | null | undefined, digits = 0): string => {
   if (v == null || Number.isNaN(v)) return '--';
   return digits > 0 ? v.toFixed(digits) : String(Math.round(v));
 };
 
-const hrColor = (hr: number | null | undefined): string => {
-  if (hr == null || Number.isNaN(hr)) return colors.textDim;
-  if (hr <= 60) return colors.good;
-  if (hr <= 75) return colors.warn;
-  return colors.bad;
-};
-
+// the figure's pulse period from heart rate, clamped to a sane animation range
 const heartPeriod = (hr: number | null | undefined): number => {
   const bpm = hr && hr > 30 ? hr : 60;
   return Math.max(600, Math.min(1400, 60000 / bpm));
@@ -84,18 +49,17 @@ function Callout({
 }
 
 export default function StatusFigure({
-  readiness, hr, hrv, temp, spo2,
+  hr, hrv, temp, spo2,
 }: {
-  readiness: number | null | undefined;
+  readiness?: number | null | undefined; // kept for call-site compatibility
   hr: number | null | undefined;
   hrv: number | null | undefined;
   temp: number | null | undefined;
   spo2: number | null | undefined;
 }) {
-  const tint = scoreColor(readiness);
-  const heartFill = hrColor(hr);
   const period = heartPeriod(hr);
 
+  // a subtle "heartbeat" scale on the whole figure, timed to the real HR
   const beat = useSharedValue(0);
   useEffect(() => {
     beat.value = withRepeat(
@@ -107,43 +71,20 @@ export default function StatusFigure({
       false,
     );
   }, [beat, period]);
-  const heartProps = useAnimatedProps(() => ({ opacity: 0.5 + beat.value * 0.5 }));
-
-  const pixels: React.ReactNode[] = [];
-  for (let r = 0; r < ROWS; r++) {
-    const row = SPRITE[r];
-    for (let c = 0; c < COLS; c++) {
-      const op = OPACITY[row[c]];
-      if (op === undefined) continue;
-      pixels.push(
-        <Rect
-          key={`${r}-${c}`}
-          x={c * CELL}
-          y={r * CELL}
-          width={CELL - 1}
-          height={CELL - 1}
-          fill={tint}
-          fillOpacity={op}
-        />,
-      );
-    }
-  }
+  const figStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + beat.value * 0.03 }] }));
 
   return (
     <View style={styles.row}>
       <View style={styles.col}>
         <Callout label="HEART" value={hr} unit="BPM" side="left" />
-        <Callout label="TEMP" value={temp} unit="°C" digits={1} side="left" />
+        <Callout label="TEMP" value={cToF(temp)} unit="°F" digits={1} side="left" />
       </View>
 
-      <Svg width={120} height={146} viewBox={`0 0 ${COLS * CELL} ${ROWS * CELL}`}>
-        {pixels}
-        <AnimatedG animatedProps={heartProps}>
-          {HEART_CELLS.map(([c, r]) => (
-            <Rect key={`h-${r}-${c}`} x={c * CELL} y={r * CELL} width={CELL - 1} height={CELL - 1} fill={heartFill} />
-          ))}
-        </AnimatedG>
-      </Svg>
+      <AnimatedImage
+        source={require('../assets/character.png')}
+        resizeMode="contain"
+        style={[styles.figure, figStyle]}
+      />
 
       <View style={styles.col}>
         <Callout label="HRV" value={hrv} unit="MS" side="right" />
@@ -156,6 +97,7 @@ export default function StatusFigure({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   col: { flex: 1, justifyContent: 'space-around', height: 190, gap: 28 },
+  figure: { width: 150, height: 180 },
   callout: {},
   alignL: { alignItems: 'flex-start' },
   alignR: { alignItems: 'flex-end' },

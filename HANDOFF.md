@@ -74,17 +74,14 @@ carries an honest AI-assisted-dev disclosure.
 4. EAS builds are name-indistinguishable — install by exact artifact URL.
 
 ## TODO / planned / discussed
-- [~] **CHARACTER** — IN PROGRESS. App now opens with an animated boot/power-on
-  screen showing a phosphor-tinted character (`app/components/BootSequence.tsx`,
-  mounted in `app/app/_layout.tsx`). Art is a placeholder at
-  `app/assets/character.png` (WHITE-on-transparent so it tints to the active
-  phosphor at runtime). To swap in the real mascot: generate a monochrome
-  white-on-transparent PNG (ChatGPT/Gemini; original — NOT Vault Boy), save it over
-  that path, and `eas update` — no code change. STATUS still uses the old pixel
-  `StatusFigure.tsx` (placement chosen = boot-screen only). REAL ART IN PLACE
-  2026-06-29: GPT-generated waving atomic-age technician, baked phosphor-green
-  (luminance-preserving) into `app/assets/character.png`; white-on-transparent
-  original kept at `app/assets/character_src.png` for future re-tinting (amber).
+- [x] **CHARACTER** — DONE 2026-06-29. GPT-generated original waving atomic-age
+  technician, baked phosphor-green (luminance-preserving) into
+  `app/assets/character.png` (white-on-transparent original kept at
+  `app/assets/character_src.png` for a future amber re-bake). Shown on the
+  boot/power-on screen (`app/components/BootSequence.tsx`) AND as the STATUS
+  centerpiece (`app/components/StatusFigure.tsx` — vitals callouts + an HR-synced
+  pulse; replaced the old pixel sprite). The boot screen now WAITS for an
+  `> INITIALIZE` tap (no auto-dismiss).
 - [x] **Sleep stages read 0** on STATUS — FIXED in
   `backend/vitaldeck/ingest/oura_api.py`. Field names were already correct; the
   night-picker now prefers records that actually have staging, and a
@@ -107,7 +104,8 @@ carries an honest AI-assisted-dev disclosure.
   Pi IP is repointable without a rebuild.
 - [~] **UI/feel polish**: boot sequence ✓, haptics ✓ + audio blip ✓
   (`app/assets/blip.wav`, played in BootSequence), status ticker ✓
-  (`app/components/Ticker.tsx`, under the STATUS figure). DEFERRED: the live
+  (`app/components/Ticker.tsx`, under the STATUS figure). Skin temp shown in °F
+  everywhere (`app/lib/units.ts`; storage/scoring stay in C). DEFERRED: the live
   green⇄amber toggle — every screen bakes the palette into `StyleSheet.create` at
   module load, so it needs a dynamic-theming refactor (~8 files). Both palettes are
   already in `app/theme.ts`; do the toggle as its own on-device-verified change.

@@ -18,6 +18,7 @@ import { LineChart } from 'react-native-gifted-charts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Panel, ScreenHeader } from '../components/Pip';
 import { getTrends } from '../lib/api';
+import { cToF } from '../lib/units';
 import type { TrendMetric } from '../lib/types';
 import { colors, font, fonts, glow, spacing } from '../theme';
 
@@ -32,7 +33,7 @@ const METRICS: {
   { key: 'readiness_custom', label: 'READINESS', unit: '', tint: colors.accent, digits: 0 },
   { key: 'hrv_rmssd', label: 'HRV', unit: 'ms', tint: colors.hrv, digits: 0 },
   { key: 'resting_hr', label: 'RESTING HR', unit: 'bpm', tint: colors.rhr, digits: 0 },
-  { key: 'temp_mean_c', label: 'SKIN TEMP', unit: 'C', tint: colors.temp, digits: 2 },
+  { key: 'temp_mean_c', label: 'SKIN TEMP', unit: '°F', tint: colors.temp, digits: 1 },
   { key: 'sleep_min', label: 'SLEEP', unit: 'min', tint: colors.sleep, digits: 0 },
   { key: 'spo2_avg', label: 'SpO2', unit: '%', tint: colors.spo2, digits: 1 },
 ];
@@ -110,15 +111,26 @@ export default function TrendsScreen() {
             </Pressable>
           </View>
         ) : (
-          <TrendChart
-            data={trends.data.points}
-            baseline14={trends.data.baseline_14}
-            baseline30={trends.data.baseline_30}
-            tint={meta.tint}
-            unit={meta.unit}
-            digits={meta.digits}
-            width={chartWidth}
-          />
+          (() => {
+            // skin temp is stored in C; convert the series + baselines to F for
+            // display so the axis/readouts read in Fahrenheit. other metrics pass through.
+            const isTemp = metric === 'temp_mean_c';
+            const cv = (v: number | null) => (isTemp ? cToF(v) : v);
+            const data = isTemp
+              ? trends.data.points.map((p) => ({ ...p, value: cv(p.value) }))
+              : trends.data.points;
+            return (
+              <TrendChart
+                data={data}
+                baseline14={cv(trends.data.baseline_14)}
+                baseline30={cv(trends.data.baseline_30)}
+                tint={meta.tint}
+                unit={meta.unit}
+                digits={meta.digits}
+                width={chartWidth}
+              />
+            );
+          })()
         )}
       </Panel>
     </ScrollView>

@@ -11,6 +11,7 @@ import StatusFigure from '../components/StatusFigure';
 import Ticker from '../components/Ticker';
 import { getToday, postSync } from '../lib/api';
 import { getApiBaseUrl } from '../lib/settings';
+import { cToF } from '../lib/units';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
 import { colors, font, fonts, glow, radius, scoreColor, spacing } from '../theme';
 
@@ -146,11 +147,12 @@ export default function StatusScreen() {
 
   const n0 = (v: number | null | undefined): string =>
     v == null || Number.isNaN(v) ? '--' : String(Math.round(v));
+  const tempF = cToF(summary?.temp_mean_c);
   const tickerItems = [
     `READINESS ${score != null ? Math.round(score) : '--'}`,
     `HRV ${n0(summary?.hrv_rmssd)} MS`,
     `RHR ${n0(summary?.resting_hr)} BPM`,
-    `SKIN ${summary?.temp_mean_c != null ? summary.temp_mean_c.toFixed(1) : '--'} C`,
+    `SKIN ${tempF != null ? tempF.toFixed(1) : '--'} °F`,
     `SpO2 ${n0(summary?.spo2_avg)} %`,
     `LINK ${getApiBaseUrl().replace(/^https?:\/\//, '')}`,
     `LAST SYNC ${fmtAsOf(data_as_of)}`,

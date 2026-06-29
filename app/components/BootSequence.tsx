@@ -1,8 +1,10 @@
 // the power-on sequence shown over everything on cold start: the operative figure
 // fades/scales in, a terminal boot log types out line-by-line with a haptic +
-// audio blip each, a progress bar fills, then the whole thing fades into the app.
-// it is BULLETPROOF about dismissing — driven by timers with an absolute safety
-// timeout and tap-to-skip — so it can never strand the UI behind the overlay.
+// audio blip each, and a progress bar fills. it then WAITS on an "> INITIALIZE"
+// button — it does not auto-dismiss — so the user enters STATUS deliberately.
+// it stays BULLETPROOF: wrapped in an error boundary (see _layout) so a render
+// throw can't strand the UI, and the button is revealed by a timer that fires
+// even if a line-reveal hiccups.
 // character.png is a phosphor-green PNG, baked luminance-preserving from the
 // white-on-transparent original kept at assets/character_src.png (so internal
 // linework survives — a flat tintColor would flatten it to a green blob). to retheme
@@ -15,17 +17,19 @@ import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { getApiBaseUrl } from '../lib/settings';
 import { colors, font, fonts, glow, spacing } from '../theme';
 
 const AnimatedImage = Animated.createAnimatedComponent(Image);
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const LINE_MS = 230; // per boot-log line
 const START_MS = 350; // delay before the first line
-const LINGER_MS = 600; // hold on "SYSTEM READY" before fading out
-const SAFETY_MS = 6000; // absolute backstop — never strand the UI
+const READY_PAD = 250; // after the last line, before the button appears
+const READY_FALLBACK_MS = 8000; // belt-and-suspenders: reveal the button regardless
 
 export default function BootSequence({ onDone }: { onDone: () => void }) {
   // boot log; the LINK line shows whatever the Pi url is currently set to
@@ -48,6 +52,7 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   }, []);
 
   const [visible, setVisible] = useState(0);
+  const [ready, setReady] = useState(false);
   const doneRef = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -55,6 +60,8 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   const charScale = useSharedValue(0.82);
   const progress = useSharedValue(0);
   const root = useSharedValue(1);
+  const initOpacity = useSharedValue(0);
+  const pulse = useSharedValue(0);
 
   // a short blip; if audio fails to load/play it must not affect the sequence
   const player = useAudioPlayer(require('../assets/blip.wav'));
@@ -73,6 +80,12 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
     }
   }, [player]);
 
+  const revealButton = useCallback(() => {
+    setReady(true);
+    initOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) });
+    pulse.value = withRepeat(withTiming(1, { duration: 800, easing: Easing.inOut(Easing.quad) }), -1, true);
+  }, [initOpacity, pulse]);
+
   const finish = useCallback(() => {
     if (doneRef.current) return;
     doneRef.current = true;
@@ -80,6 +93,16 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
     root.value = withTiming(0, { duration: 320, easing: Easing.in(Easing.quad) });
     setTimeout(onDone, 340);
   }, [onDone, root]);
+
+  const onInit = useCallback(() => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {
+      // ignore
+    }
+    cue();
+    finish();
+  }, [cue, finish]);
 
   useEffect(() => {
     try {
@@ -105,13 +128,14 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
       );
     });
 
-    timers.current.push(
-      setTimeout(finish, START_MS + lines.length * LINE_MS + LINGER_MS),
-    );
-    timers.current.push(setTimeout(finish, SAFETY_MS));
+    // reveal the INITIALIZE button after the log finishes (and a fallback so it
+    // always appears even if a line-reveal hiccups). NO auto-dismiss — the user
+    // taps to enter.
+    timers.current.push(setTimeout(revealButton, START_MS + lines.length * LINE_MS + READY_PAD));
+    timers.current.push(setTimeout(revealButton, READY_FALLBACK_MS));
 
     return () => timers.current.forEach(clearTimeout);
-    // run-once on mount; lines/cue/finish are stable for the boot's lifetime
+    // run-once on mount; callbacks are stable for the boot's lifetime
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -121,12 +145,13 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
     transform: [{ scale: charScale.value }],
   }));
   const progStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
+  const initStyle = useAnimatedStyle(() => ({
+    opacity: initOpacity.value,
+    transform: [{ scale: 1 + pulse.value * 0.05 }],
+  }));
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, rootStyle]}>
-      {/* full-screen tap target sits under the (pointer-transparent) content */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={finish} />
-
       <View style={styles.stack} pointerEvents="none">
         <AnimatedImage
           source={require('../assets/character.png')}
@@ -151,9 +176,15 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
         </View>
       </View>
 
-      <Text style={styles.skip} pointerEvents="none">
-        TAP TO SKIP
-      </Text>
+      {ready ? (
+        <AnimatedPressable style={[styles.initBtn, initStyle]} onPress={onInit}>
+          <Text style={styles.initText}>{'> INITIALIZE'}</Text>
+        </AnimatedPressable>
+      ) : (
+        <Text style={styles.loading} pointerEvents="none">
+          BOOTING…
+        </Text>
+      )}
     </Animated.View>
   );
 }
@@ -193,9 +224,26 @@ const styles = StyleSheet.create({
     padding: 1,
   },
   progressFill: { height: '100%', backgroundColor: colors.text },
-  skip: {
+  initBtn: {
     position: 'absolute',
-    bottom: 44,
+    bottom: 64,
+    borderWidth: 1,
+    borderColor: colors.text,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.surface,
+    ...glow(colors.text, 12),
+  },
+  initText: {
+    color: colors.text,
+    fontFamily: fonts.mono,
+    fontSize: font.body,
+    letterSpacing: 2,
+    ...glow(colors.text, 8),
+  },
+  loading: {
+    position: 'absolute',
+    bottom: 72,
     color: colors.textFaint,
     fontFamily: fonts.mono,
     fontSize: font.tiny,
