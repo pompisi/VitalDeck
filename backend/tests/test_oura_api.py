@@ -167,3 +167,36 @@ def test_picker_prefers_staged_record_over_unstaged():
     # the staged record wins despite being shorter -> stages are real, not zero
     assert s["deep_min"] == 60.0
     assert s["rem_min"] == 60.0
+
+
+# --- live heart rate (the only intraday cloud metric) -----------------------
+
+
+def test_summarize_heartrate_latest_and_stats():
+    rows = [
+        {"timestamp": "2026-06-29T14:00:00.000Z", "bpm": 60, "source": "rest"},
+        {"timestamp": "2026-06-29T14:05:00.000Z", "bpm": 120, "source": "awake"},
+        {"timestamp": "2026-06-29T14:06:00.000Z", "bpm": 80, "source": "awake"},
+        {"timestamp": "2026-06-29T14:06:30.000Z", "bpm": 84, "source": "awake"},
+    ]
+    out = oura_api.summarize_heartrate(rows)
+    # current = avg of samples within 2 min of the latest (120, 80, 84)
+    assert out["bpm"] == round((120 + 80 + 84) / 3)
+    assert out["ts_ms"] is not None
+    assert out["day_min"] == 60 and out["day_max"] == 120
+    assert out["count"] == 4
+
+
+def test_summarize_heartrate_empty():
+    out = oura_api.summarize_heartrate([])
+    assert out["bpm"] is None and out["count"] == 0
+
+
+def test_summarize_heartrate_excludes_sleep_from_day_pool():
+    rows = [
+        {"timestamp": "2026-06-29T03:00:00.000Z", "bpm": 48, "source": "sleep"},
+        {"timestamp": "2026-06-29T14:00:00.000Z", "bpm": 70, "source": "awake"},
+    ]
+    out = oura_api.summarize_heartrate(rows)
+    assert out["day_min"] == 70 and out["day_max"] == 70
+    assert out["bpm"] == 70

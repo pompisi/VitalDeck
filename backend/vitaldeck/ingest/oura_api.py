@@ -284,3 +284,73 @@ def ingest_oura(conn, token: str, days: int = 30) -> dict[str, int]:
             print(f"[oura] upsert sleep {sess.get('date')} failed: {exc}")
 
     return {"ingested": n_daily, "deduped": 0, "sleep_sessions": n_sleep}
+
+
+# --- live heart rate ------------------------------------------------------
+# the ONLY metric oura's cloud exposes intraday: the /heartrate time series (5-min
+# daytime samples, denser during workouts). everything else (hrv, spo2, temp, sleep)
+# is nightly-only from the cloud. this powers the app's live-ish HR readout. "live"
+# here means "as fresh as the ring's last upload to the oura app" — usually minutes.
+
+
+def _hr_ts_ms(s: dict[str, Any]) -> Optional[int]:
+    """epoch ms for one heartrate sample. prefers the measurement `timestamp`
+    (iso8601, possibly 'Z'-suffixed), falling back to `producer_timestamp` (ms)."""
+    ts = s.get("timestamp")
+    if isinstance(ts, str):
+        try:
+            return int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            pass
+    pt = s.get("producer_timestamp")
+    try:
+        return int(pt) if pt is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_heartrate(token: str, hours: int = 6) -> list[dict[str, Any]]:
+    """pulling the trailing <hours> of heartrate samples from the oura v2 api. this
+    endpoint takes start_datetime/end_datetime (not start_date/end_date)."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    params = {"start_datetime": start.isoformat(), "end_datetime": end.isoformat()}
+    return _rows(_get("heartrate", token, params))
+
+
+def summarize_heartrate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """pure: latest HR (smoothed over the trailing ~2 min so a single spiky sample
+    doesn't dominate) + the window's min/max/avg over non-sleep samples. bpm is None
+    when there are no usable samples (ring hasn't synced recently)."""
+    samples: list[tuple[int, float, Optional[str]]] = []
+    for s in rows:
+        bpm = _num(s.get("bpm"))
+        ms = _hr_ts_ms(s)
+        if bpm is None or ms is None:
+            continue
+        samples.append((ms, bpm, s.get("source")))
+    if not samples:
+        return {"bpm": None, "ts_ms": None, "source": None,
+                "day_min": None, "day_max": None, "day_avg": None, "count": 0}
+    samples.sort(key=lambda x: x[0])
+    latest_ms, latest_bpm, latest_src = samples[-1]
+    recent = [b for (ms, b, _s) in samples if latest_ms - ms <= 120_000]
+    cur = round(sum(recent) / len(recent)) if recent else round(latest_bpm)
+    pool = [b for (_m, b, src) in samples if src != "sleep"] or [b for (_m, b, _s) in samples]
+    return {
+        "bpm": int(cur),
+        "ts_ms": int(latest_ms),
+        "source": latest_src,
+        "day_min": int(round(min(pool))),
+        "day_max": int(round(max(pool))),
+        "day_avg": int(round(sum(pool) / len(pool))),
+        "count": len(samples),
+    }
+
+
+def live_heartrate(token: str, window_hours: int = 6) -> dict[str, Any]:
+    """fetch + summarize the latest live HR. raises OuraError on a network failure
+    (the api layer catches it and returns ok=false)."""
+    if not token:
+        raise OuraError("no oura token configured")
+    return summarize_heartrate(fetch_heartrate(token, hours=window_hours))

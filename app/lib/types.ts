@@ -141,7 +141,21 @@ export interface SyncResponse {
   ingested: number;
   deduped: number;
   data_as_of: number | null;
-  mode: 'live' | 'synthetic';
+  mode: 'live' | 'synthetic' | 'oura';
+}
+
+// live-ish current heart rate (the only intraday metric the Oura cloud exposes).
+// bpm is null when the ring hasn't synced recently or no token is set.
+export interface LiveResponse {
+  ok: boolean;
+  bpm: number | null;
+  ts_ms: number | null;
+  source: string | null;
+  day_min: number | null;
+  day_max: number | null;
+  day_avg: number | null;
+  count?: number | null;
+  error?: string | null;
 }
 
 // every api call returns this envelope so screens can branch on ok vs error

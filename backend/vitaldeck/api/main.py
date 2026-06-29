@@ -25,6 +25,7 @@ from vitaldeck.metrics import readiness as readiness_mod
 from .models import (
     DeleteResponse,
     HealthResponse,
+    LiveResponse,
     MetricsResponse,
     SleepResponse,
     SummaryResponse,
@@ -140,6 +141,26 @@ def health() -> dict[str, Any]:
         print(f"[api] /health db open failed: {exc}")
         db_ok = False
     return {"status": "ok", "db": db_ok, "data_as_of": data_as_of}
+
+
+# ---------------------------------------------------------------------------
+# live — the only intraday metric the oura cloud exposes (heart rate)
+# ---------------------------------------------------------------------------
+@app.get("/live", response_model=LiveResponse)
+def live() -> dict[str, Any]:
+    """latest live-ish heart rate (+ today's HR range) straight from the oura cloud.
+    HR is the ONLY metric available intraday — hrv/spo2/temp/sleep are nightly. always
+    200s: bpm is null (with an `error`) when there's no token or no recent sample."""
+    if not config.OURA_TOKEN:
+        return {"ok": False, "error": "no oura token configured"}
+    try:
+        from vitaldeck.ingest import oura_api
+
+        data = oura_api.live_heartrate(config.OURA_TOKEN)
+        return {"ok": True, "error": None, **data}
+    except Exception as exc:
+        print(f"[api] /live failed: {exc}")
+        return {"ok": False, "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

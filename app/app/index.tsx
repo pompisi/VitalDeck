@@ -7,9 +7,10 @@ import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LiveBadge from '../components/LiveBadge';
 import StatusFigure from '../components/StatusFigure';
 import Ticker from '../components/Ticker';
-import { getToday, postSync } from '../lib/api';
+import { getLive, getToday, postSync } from '../lib/api';
 import { getApiBaseUrl } from '../lib/settings';
 import { cToF } from '../lib/units';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
@@ -109,11 +110,24 @@ export default function StatusScreen() {
     return () => clearInterval(id);
   }, []);
 
+  // live-ish current heart rate: polled from the Oura cloud every 60s (and on
+  // focus / when SYNC is pressed). the only intraday metric the cloud exposes.
+  const live = useQuery({
+    queryKey: ['live'],
+    queryFn: getLive,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const SyncButton = (
     <Pressable
       style={[styles.cmd, sync.isPending && styles.cmdBusy]}
       disabled={sync.isPending}
-      onPress={() => sync.mutate()}
+      onPress={() => {
+        sync.mutate();
+        live.refetch();
+      }}
     >
       <Text style={styles.cmdText}>{sync.isPending ? '> SYNCING SENSORS…' : '> SYNC SENSORS'}</Text>
     </Pressable>
@@ -162,11 +176,21 @@ export default function StatusScreen() {
   const score = metric?.readiness_custom ?? null;
   const tint = scoreColor(score);
 
+  // live HR (from the /live poll) drives the HEART readout when fresh (< 30 min old);
+  // otherwise we fall back to last night's resting HR.
+  const liveBpm = live.data?.ok ? live.data.bpm : null;
+  const liveFresh =
+    liveBpm != null &&
+    live.data?.ts_ms != null &&
+    Date.now() - live.data.ts_ms < 30 * 60 * 1000;
+  const heartHr = liveBpm ?? summary?.resting_hr;
+
   const n0 = (v: number | null | undefined): string =>
     v == null || Number.isNaN(v) ? '--' : String(Math.round(v));
   const tempF = cToF(summary?.temp_mean_c);
   const tickerItems = [
     `READINESS ${score != null ? Math.round(score) : '--'}`,
+    `HR ${liveBpm != null ? liveBpm : '--'} BPM`,
     `HRV ${n0(summary?.hrv_rmssd)} MS`,
     `RHR ${n0(summary?.resting_hr)} BPM`,
     `SKIN ${tempF != null ? tempF.toFixed(1) : '--'} °F`,
@@ -193,10 +217,17 @@ export default function StatusScreen() {
 
       <StatusFigure
         readiness={score}
-        hr={summary?.resting_hr}
+        hr={heartHr}
         hrv={summary?.hrv_rmssd}
         temp={summary?.temp_mean_c}
         spo2={summary?.spo2_avg}
+      />
+
+      <LiveBadge
+        fresh={liveFresh}
+        tsMs={live.data?.ts_ms}
+        dayMin={live.data?.day_min}
+        dayMax={live.data?.day_max}
       />
 
       <Ticker items={tickerItems} />

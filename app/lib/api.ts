@@ -4,6 +4,7 @@
 import type {
   ApiResult,
   HealthResponse,
+  LiveResponse,
   MetricsResponse,
   NewTag,
   SleepResponse,
@@ -71,6 +72,10 @@ async function unwrap<T>(p: Promise<ApiResult<T>>): Promise<T> {
 // --- reads -----------------------------------------------------------------
 
 export const getHealth = () => request<HealthResponse>('/health');
+
+// live-ish current heart rate (polled from STATUS). /live always returns 200 — bpm
+// is null with an `error` when unavailable — so unwrap won't throw on "no data".
+export const getLive = () => unwrap(request<LiveResponse>('/live'));
 
 export const getToday = () => unwrap(request<SummaryResponse>('/summary/today'));
 

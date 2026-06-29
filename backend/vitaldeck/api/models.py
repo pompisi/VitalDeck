@@ -82,3 +82,17 @@ class SyncResponse(BaseModel):
     data_as_of: Optional[int] = None
     mode: str = "synthetic"
     error: Optional[str] = None
+
+
+class LiveResponse(BaseModel):
+    # live-ish current heart rate from the oura cloud (the only intraday metric).
+    # bpm is null when the ring hasn't synced recently or no token is configured.
+    ok: bool = True
+    bpm: Optional[int] = None
+    ts_ms: Optional[int] = None
+    source: Optional[str] = None
+    day_min: Optional[int] = None
+    day_max: Optional[int] = None
+    day_avg: Optional[int] = None
+    count: Optional[int] = None
+    error: Optional[str] = None
