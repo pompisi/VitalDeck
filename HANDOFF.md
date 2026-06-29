@@ -110,6 +110,11 @@ carries an honest AI-assisted-dev disclosure.
 3. Samsung excludes the BT snoop log from `adb bugreport` and locks it behind root →
    no-root capture needs SysDump `*#9900#` (see `docs/SAMSUNG_SNOOP_FINDING.md`).
 4. EAS builds are name-indistinguishable — install by exact artifact URL.
+5. The store's `_row_to_dict` parses + RENAMES every `*_json` column, dropping the
+   suffix: `stage_breakdown_json`→`stage_breakdown`, `stages_json`→`stages`,
+   `components_json`→`components`, `data_json`→`data`. The API returns the stripped
+   keys. STATUS once read `summary.stage_breakdown_json` (undefined → stages showed
+   0) — read the stripped key. Same applies to any new `*_json` consumer.
 
 ## TODO / planned / discussed
 - [x] **CHARACTER** — DONE 2026-06-29. GPT-generated original waving atomic-age
