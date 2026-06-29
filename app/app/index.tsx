@@ -4,7 +4,7 @@
 // unchanged from before — this is the restyle.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusFigure from '../components/StatusFigure';
@@ -15,12 +15,22 @@ import { cToF } from '../lib/units';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
 import { colors, font, fonts, glow, radius, scoreColor, spacing } from '../theme';
 
+// the data timestamp (when the latest reading is from) — shown in the ticker.
 const fmtAsOf = (ms: number | null | undefined): string => {
   if (ms == null) return 'NO SIGNAL';
   try {
-    return format(new Date(ms), 'yyyy.MM.dd HH:mm').toUpperCase();
+    return format(new Date(ms), 'yyyy.MM.dd h:mm a').toUpperCase();
   } catch {
     return 'UNKNOWN';
+  }
+};
+
+// the live wall clock shown in the header — device-local, 12-hour with AM/PM.
+const fmtClock = (ms: number): string => {
+  try {
+    return format(new Date(ms), 'yyyy.MM.dd  h:mm a').toUpperCase();
+  } catch {
+    return '';
   }
 };
 
@@ -91,6 +101,13 @@ export default function StatusScreen() {
 
   const today = useQuery({ queryKey: ['summary', 'today'], queryFn: getToday });
   const sync = useMutation({ mutationFn: postSync, onSuccess: () => qc.invalidateQueries() });
+
+  // a live clock for the header, ticking every 30s (kept in sync with the device)
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const SyncButton = (
     <Pressable
@@ -169,7 +186,7 @@ export default function StatusScreen() {
       {/* header rule */}
       <View style={styles.headRow}>
         <Text style={styles.head}>STATUS</Text>
-        <Text style={styles.headAsOf}>{fmtAsOf(data_as_of)}</Text>
+        <Text style={styles.headAsOf}>{fmtClock(now)}</Text>
       </View>
       <View style={styles.headRule} />
       <Text style={styles.sub}>VITAL SIGNS // VAULT-DWELLER</Text>

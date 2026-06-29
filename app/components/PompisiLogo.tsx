@@ -4,7 +4,7 @@
 // character-by-character (used on the boot screen); the cursor always blinks.
 // left-aligned inside a fixed-width box so the type-on grows rightward without the
 // lockup shifting.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -22,13 +22,24 @@ export default function PompisiLogo({
   typeOn = false,
   size = 32,
   tagline,
+  onType,
+  onComplete,
 }: {
   typeOn?: boolean;
   size?: number;
   tagline?: string;
+  onType?: () => void; // fired per character revealed (drives the typing blip)
+  onComplete?: () => void; // fired once the name is fully typed
 }) {
   const [n, setN] = useState(typeOn ? 0 : WORD.length);
   const blink = useSharedValue(1);
+
+  // hold the latest callbacks in refs so the type-on interval below can run once
+  // (on `typeOn`) without restarting when the parent re-renders
+  const onTypeRef = useRef(onType);
+  onTypeRef.current = onType;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     blink.value = withRepeat(withTiming(0, { duration: 520, easing: Easing.linear }), -1, true);
@@ -40,7 +51,11 @@ export default function PompisiLogo({
     const id = setInterval(() => {
       i += 1;
       setN(i);
-      if (i >= WORD.length) clearInterval(id);
+      onTypeRef.current?.();
+      if (i >= WORD.length) {
+        clearInterval(id);
+        onCompleteRef.current?.();
+      }
     }, TYPE_MS);
     return () => clearInterval(id);
   }, [typeOn]);

@@ -85,6 +85,14 @@ carries an honest AI-assisted-dev disclosure.
   brand mark (`app/components/PompisiLogo.tsx` — a typed-on `> POMPISI STUDIO`
   command-prompt wordmark in Share Tech Mono) instead of the character, then
   VITALDECK, then the boot log; it WAITS for an `> INITIALIZE` tap (no auto-dismiss).
+  The boot plays in two phases with sound: the logo types out (blip per char), then
+  VITALDECK + the boot log type out (blip + haptic per line).
+- [ ] **Pompisi Studio brand expansion** (eventual) — the in-app mark is
+  `app/components/PompisiLogo.tsx` (the typed `> POMPISI STUDIO` wordmark). Make a
+  portable ASSET PACK from it: standalone SVG/PNG (light + dark, with/without the
+  optional tagline) for GitHub READMEs, app icons, social — and reuse the mark across
+  MangaStacked / RetroDeck for one consistent studio identity. Brand notes also saved
+  to cross-session memory (pompisi-studio-brand).
 - [x] **Sleep stages read 0** on STATUS — FIXED in
   `backend/vitaldeck/ingest/oura_api.py`. Field names were already correct; the
   night-picker now prefers records that actually have staging, and a

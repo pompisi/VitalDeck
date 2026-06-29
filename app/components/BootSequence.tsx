@@ -1,12 +1,12 @@
-// the power-on sequence shown over everything on cold start: the operative figure
-// fades/scales in, a terminal boot log types out line-by-line with a haptic +
-// audio blip each, and a progress bar fills. it then WAITS on an "> INITIALIZE"
-// button — it does not auto-dismiss — so the user enters STATUS deliberately.
-// it stays BULLETPROOF: wrapped in an error boundary (see _layout) so a render
-// throw can't strand the UI, and the button is revealed by a timer that fires
-// even if a line-reveal hiccups.
-// the hero is the Pompisi Studio brand mark (PompisiLogo), typed on; the app it's
-// launching (VITALDECK) sits below it. the character now lives on the STATUS screen.
+// the power-on sequence shown over everything on cold start. it runs in two phases
+// with sound:
+//   1. the Pompisi Studio brand mark types itself out, a blip per character.
+//   2. when it finishes, VITALDECK fades in and the terminal boot log types out
+//      line-by-line (blip + haptic each), a progress bar fills.
+// then it WAITS on an "> INITIALIZE" button — it does not auto-dismiss.
+// BULLETPROOF: wrapped in an error boundary (see _layout) so a render throw can't
+// strand the UI; the log and the button are also started by safety timers in case a
+// callback never fires. the character now lives on the STATUS screen.
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,15 +21,15 @@ import Animated, {
 import { getApiBaseUrl } from '../lib/settings';
 import { colors, font, fonts, glow, spacing } from '../theme';
 import PompisiLogo from './PompisiLogo';
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const LINE_MS = 230; // per boot-log line
-const START_MS = 350; // delay before the first line
 const READY_PAD = 250; // after the last line, before the button appears
-const READY_FALLBACK_MS = 8000; // belt-and-suspenders: reveal the button regardless
+const LOG_SAFETY_MS = 3200; // start the log even if the logo's onComplete never fires
+const READY_FALLBACK_MS = 9000; // absolute backstop: reveal the button no matter what
 
 export default function BootSequence({ onDone }: { onDone: () => void }) {
-  // boot log; the LINK line shows whatever the Pi url is currently set to
   const lines = useMemo(() => {
     let host = '---';
     try {
@@ -51,37 +51,68 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   const [visible, setVisible] = useState(0);
   const [ready, setReady] = useState(false);
   const doneRef = useRef(false);
+  const logStarted = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const charOpacity = useSharedValue(0);
   const charScale = useSharedValue(0.82);
+  const appOpacity = useSharedValue(0);
   const progress = useSharedValue(0);
   const root = useSharedValue(1);
   const initOpacity = useSharedValue(0);
   const pulse = useSharedValue(0);
 
-  // a short blip; if audio fails to load/play it must not affect the sequence
   const player = useAudioPlayer(require('../assets/blip.wav'));
 
-  const cue = useCallback(() => {
+  // audio-only blip (used for the per-character typing); never throws into the UI
+  const blip = useCallback(() => {
     try {
       player.seekTo(0);
       player.play();
     } catch {
-      // audio is cosmetic — ignore any failure
+      // audio is cosmetic
     }
+  }, [player]);
+
+  // blip + a light haptic (used for each boot-log line)
+  const cue = useCallback(() => {
+    blip();
     try {
       Haptics.selectionAsync();
     } catch {
-      // haptics unavailable on some devices — ignore
+      // haptics unavailable on some devices
     }
-  }, [player]);
+  }, [blip]);
 
   const revealButton = useCallback(() => {
     setReady(true);
     initOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) });
-    pulse.value = withRepeat(withTiming(1, { duration: 800, easing: Easing.inOut(Easing.quad) }), -1, true);
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 800, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true,
+    );
   }, [initOpacity, pulse]);
+
+  // phase 2: reveal VITALDECK + the boot log, then arm the INITIALIZE button
+  const startLog = useCallback(() => {
+    if (logStarted.current) return;
+    logStarted.current = true;
+    appOpacity.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.quad) });
+    progress.value = withTiming(1, {
+      duration: lines.length * LINE_MS + 200,
+      easing: Easing.linear,
+    });
+    lines.forEach((_, i) => {
+      timers.current.push(
+        setTimeout(() => {
+          setVisible(i + 1);
+          cue();
+        }, i * LINE_MS),
+      );
+    });
+    timers.current.push(setTimeout(revealButton, lines.length * LINE_MS + READY_PAD));
+  }, [lines, cue, appOpacity, progress, revealButton]);
 
   const finish = useCallback(() => {
     if (doneRef.current) return;
@@ -97,38 +128,22 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
     } catch {
       // ignore
     }
-    cue();
+    blip();
     finish();
-  }, [cue, finish]);
+  }, [blip, finish]);
 
   useEffect(() => {
     try {
-      // let the blip sound even with the ringer switch silenced
       setAudioModeAsync({ playsInSilentMode: true });
     } catch {
       // non-fatal
     }
+    // phase 1: the logo's entrance; it types itself out (see PompisiLogo onType)
+    charOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.quad) });
+    charScale.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.back(1.4)) });
 
-    charOpacity.value = withTiming(1, { duration: 550, easing: Easing.out(Easing.quad) });
-    charScale.value = withTiming(1, { duration: 650, easing: Easing.out(Easing.back(1.4)) });
-    progress.value = withTiming(1, {
-      duration: lines.length * LINE_MS + 200,
-      easing: Easing.linear,
-    });
-
-    lines.forEach((_, i) => {
-      timers.current.push(
-        setTimeout(() => {
-          setVisible(i + 1);
-          cue();
-        }, START_MS + i * LINE_MS),
-      );
-    });
-
-    // reveal the INITIALIZE button after the log finishes (and a fallback so it
-    // always appears even if a line-reveal hiccups). NO auto-dismiss — the user
-    // taps to enter.
-    timers.current.push(setTimeout(revealButton, START_MS + lines.length * LINE_MS + READY_PAD));
+    // safety nets so the UI can never get stuck behind the overlay
+    timers.current.push(setTimeout(startLog, LOG_SAFETY_MS));
     timers.current.push(setTimeout(revealButton, READY_FALLBACK_MS));
 
     return () => timers.current.forEach(clearTimeout);
@@ -137,10 +152,11 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   }, []);
 
   const rootStyle = useAnimatedStyle(() => ({ opacity: root.value }));
-  const charStyle = useAnimatedStyle(() => ({
+  const logoStyle = useAnimatedStyle(() => ({
     opacity: charOpacity.value,
     transform: [{ scale: charScale.value }],
   }));
+  const appStyle = useAnimatedStyle(() => ({ opacity: appOpacity.value }));
   const progStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
   const initStyle = useAnimatedStyle(() => ({
     opacity: initOpacity.value,
@@ -150,12 +166,15 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, rootStyle]}>
       <View style={styles.stack} pointerEvents="none">
-        <Animated.View style={[styles.logoWrap, charStyle]}>
-          <PompisiLogo typeOn size={32} />
+        <Animated.View style={[styles.logoWrap, logoStyle]}>
+          <PompisiLogo typeOn size={32} onType={blip} onComplete={startLog} />
         </Animated.View>
-        <Text style={styles.title}>VITALDECK</Text>
 
-        <View style={styles.console}>
+        <Animated.View style={appStyle}>
+          <Text style={styles.title}>VITALDECK</Text>
+        </Animated.View>
+
+        <Animated.View style={[styles.console, appStyle]}>
           {lines.slice(0, visible).map((ln, i) => (
             <Text
               key={i}
@@ -168,7 +187,7 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
           <View style={styles.progressTrack}>
             <Animated.View style={[styles.progressFill, progStyle]} />
           </View>
-        </View>
+        </Animated.View>
       </View>
 
       {ready ? (
@@ -200,6 +219,7 @@ const styles = StyleSheet.create({
     fontSize: 56,
     letterSpacing: 4,
     marginTop: spacing.sm,
+    textAlign: 'center',
     ...glow(colors.text, 16),
   },
   console: { width: '82%', marginTop: spacing.xl, minHeight: 150 },
