@@ -79,6 +79,12 @@ carries an honest AI-assisted-dev disclosure.
   `app/assets/character.png` (white-on-transparent original kept at
   `app/assets/character_src.png` for a future amber re-bake). Shown on the
   STATUS centerpiece (`app/components/StatusFigure.tsx` — vitals callouts, static).
+  The STATUS figure is USER-SELECTABLE (SETTINGS → FIGURE): OPERATIVE (the
+  long-curly-hair "you" version) or WIZARD, mapped in `app/lib/characters.ts`
+  (default operative). Add a skin = drop a baked PNG + one map entry. Backgrounds
+  are removed by flood/mask-BFS keying (the GPT exports bake the checkerboard in as
+  opaque gray; white outline/fill is the barrier). `*_src.png` = white-on-transparent
+  originals for re-tinting.
   NOTE: the GPT export was actually fully opaque (checkerboard painted in as gray
   pixels); the bake flood-keys that out from the borders before tinting (see the
   re-bake history). The boot/power-on screen now leads with the **Pompisi Studio**
@@ -112,7 +118,9 @@ carries an honest AI-assisted-dev disclosure.
   TEST-pings (`/health` + latency), and persists the backend URL via
   `app/lib/settings.ts` (AsyncStorage). `app/lib/api.ts` now resolves the base url
   at call time (in-app value > `EXPO_PUBLIC_API_URL` > hardcoded Pi default), so the
-  Pi IP is repointable without a rebuild.
+  Pi IP is repointable without a rebuild. Also a FIGURE character picker and a BOOT
+  SOUND on/off toggle — both persisted and live (pub/sub via `useSyncExternalStore`
+  in `app/lib/settings.ts`).
 - [~] **UI/feel polish**: boot sequence ✓, haptics ✓ + audio blip ✓
   (`app/assets/blip.wav`, played in BootSequence), status ticker ✓
   (`app/components/Ticker.tsx`, under the STATUS figure). Skin temp shown in °F

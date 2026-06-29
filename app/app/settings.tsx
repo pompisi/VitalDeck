@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import React, { useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +16,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Panel, ScreenHeader } from '../components/Pip';
 import { getHealth } from '../lib/api';
+import { CHARACTERS } from '../lib/characters';
 import {
   DEFAULT_API_URL,
   getApiBaseUrl,
   resetApiBaseUrl,
   setApiBaseUrl,
+  setCharacter,
+  setSoundEnabled,
+  useCharacter,
+  useSoundEnabled,
 } from '../lib/settings';
-import { colors, font, fonts, spacing } from '../theme';
+import { colors, font, fonts, glow, spacing } from '../theme';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -32,6 +38,9 @@ export default function SettingsScreen() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testOk, setTestOk] = useState(false);
+
+  const character = useCharacter();
+  const sound = useSoundEnabled();
 
   // apply the typed value to the live client (also persists it)
   const apply = async (next: string) => {
@@ -124,6 +133,36 @@ export default function SettingsScreen() {
         ) : null}
       </Panel>
 
+      <Panel title="FIGURE">
+        <Text style={styles.label}>STATUS CHARACTER</Text>
+        <View style={styles.charRow}>
+          {CHARACTERS.map((c) => {
+            const active = c.key === character;
+            return (
+              <Pressable
+                key={c.key}
+                style={[styles.charCard, active && styles.charCardActive]}
+                onPress={() => setCharacter(c.key)}
+              >
+                <Image source={c.source} style={styles.charThumb} resizeMode="contain" />
+                <Text style={[styles.charName, active && styles.charNameActive]}>{c.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Panel>
+
+      <Panel title="INTERFACE">
+        <Pressable style={styles.toggleRow} onPress={() => setSoundEnabled(!sound)}>
+          <Text style={styles.rowLabel}>BOOT SOUND</Text>
+          <View style={[styles.toggle, sound ? styles.toggleOn : styles.toggleOff]}>
+            <Text style={[styles.toggleText, sound && styles.toggleTextOn]}>
+              {sound ? 'ON' : 'OFF'}
+            </Text>
+          </View>
+        </Pressable>
+      </Panel>
+
       <Panel title="SYSTEM">
         <Row label="APP VERSION" value={version} />
         <Row label="DEFAULT URL" value={DEFAULT_API_URL.replace(/^https?:\/\//, '')} />
@@ -186,6 +225,39 @@ const styles = StyleSheet.create({
   result: { fontSize: font.small, textAlign: 'center', marginTop: spacing.sm, letterSpacing: 1 },
   ok: { color: colors.good, fontSize: font.small, textAlign: 'center', marginTop: spacing.sm, letterSpacing: 1 },
   bad: { color: colors.bad },
+
+  charRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  charCard: {
+    flex: 1,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  charCardActive: { borderColor: colors.text },
+  charThumb: { width: 84, height: 108 },
+  charName: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 2 },
+  charNameActive: { color: colors.text, ...glow(colors.text, 8) },
+
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  toggle: {
+    borderWidth: 1,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.lg,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  toggleOn: { borderColor: colors.text, backgroundColor: colors.surface },
+  toggleOff: { borderColor: colors.border, backgroundColor: 'transparent' },
+  toggleText: { fontFamily: fonts.mono, fontSize: font.small, letterSpacing: 2, color: colors.textFaint },
+  toggleTextOn: { color: colors.text, ...glow(colors.text, 6) },
 
   row: {
     flexDirection: 'row',

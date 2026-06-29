@@ -1,9 +1,11 @@
-// the STATUS centerpiece: the same phosphor operative from the boot screen, with
-// the live vitals pinned around it (HEART/TEMP left, HRV/SpO2 right). static — no
-// pulsing. temp is shown in Fahrenheit. the art is assets/character.png (baked
-// phosphor-green on a real transparent background — see BootSequence for notes).
+// the STATUS centerpiece: the phosphor figure the user picked in settings (the
+// "player toggle"), with the live vitals pinned around it (HEART/TEMP left, HRV/SpO2
+// right). static — no pulsing. temp is shown in Fahrenheit. art is a baked
+// phosphor-green PNG on a real transparent background (see lib/characters).
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { characterSource } from '../lib/characters';
+import { useCharacter } from '../lib/settings';
 import { cToF } from '../lib/units';
 import { colors, font, fonts } from '../theme';
 
@@ -40,6 +42,7 @@ export default function StatusFigure({
   temp: number | null | undefined;
   spo2: number | null | undefined;
 }) {
+  const character = useCharacter();
   return (
     <View style={styles.row}>
       <View style={styles.col}>
@@ -47,11 +50,7 @@ export default function StatusFigure({
         <Callout label="TEMP" value={cToF(temp)} unit="°F" digits={1} side="left" />
       </View>
 
-      <Image
-        source={require('../assets/character.png')}
-        resizeMode="contain"
-        style={styles.figure}
-      />
+      <Image source={characterSource(character)} resizeMode="contain" style={styles.figure} />
 
       <View style={styles.col}>
         <Callout label="HRV" value={hrv} unit="MS" side="right" />

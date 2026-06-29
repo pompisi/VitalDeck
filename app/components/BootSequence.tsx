@@ -18,7 +18,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { getApiBaseUrl } from '../lib/settings';
+import { getApiBaseUrl, isSoundEnabled } from '../lib/settings';
 import { colors, font, fonts, glow, spacing } from '../theme';
 import PompisiLogo from './PompisiLogo';
 
@@ -64,8 +64,10 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
 
   const player = useAudioPlayer(require('../assets/blip.wav'));
 
-  // audio-only blip (used for the per-character typing); never throws into the UI
+  // audio-only blip (used for the per-character typing); honors the sound setting
+  // and never throws into the UI
   const blip = useCallback(() => {
+    if (!isSoundEnabled()) return;
     try {
       player.seekTo(0);
       player.play();
