@@ -1,40 +1,40 @@
-// Today: the home screen. a big readiness ring with its component breakdown,
-// a grid of the headline vitals (resting HR / HRV / skin temp / SpO2), last
-// night's sleep summary, a "data as of" line, and a sync button that runs the
-// backend pipeline then refetches everything.
+// STATUS: the pip-boy-style home screen. a header rule, the original operative
+// figure with vitals pinned around it, an HP-style CONDITION bar, a readiness-
+// factors panel, last rest, and a terminal-style sync command. data + states are
+// unchanged from before — this is the restyle.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import React from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ReadinessRing from '../components/ReadinessRing';
-import Section from '../components/Section';
-import StatCard from '../components/StatCard';
+import StatusFigure from '../components/StatusFigure';
 import { getToday, postSync } from '../lib/api';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
-import { colors, font, radius, scoreColor, spacing } from '../theme';
+import { colors, font, fonts, glow, radius, scoreColor, spacing } from '../theme';
 
-// the data_as_of value is epoch ms; turning it into a friendly local stamp
 const fmtAsOf = (ms: number | null | undefined): string => {
-  if (ms == null) return 'no data yet';
+  if (ms == null) return 'NO SIGNAL';
   try {
-    return format(new Date(ms), "EEE MMM d, h:mm a");
+    return format(new Date(ms), 'yyyy.MM.dd HH:mm').toUpperCase();
   } catch {
-    return 'unknown';
+    return 'UNKNOWN';
   }
 };
 
-// parsing stage_breakdown whether the api gave us an object or a json string
-const parseStages = (
-  raw: StageBreakdown | string | null | undefined,
-): StageBreakdown => {
+const minutesToHM = (min: number | null | undefined): string => {
+  if (min == null || Number.isNaN(min)) return '--';
+  return `${Math.floor(min / 60)}h ${Math.round(min % 60)}m`;
+};
+
+const conditionWord = (score: number | null | undefined): string => {
+  if (score == null || Number.isNaN(score)) return 'NO DATA';
+  if (score >= 75) return 'OPTIMAL';
+  if (score >= 50) return 'FAIR';
+  if (score >= 25) return 'STRAINED';
+  return 'CRITICAL';
+};
+
+const parseStages = (raw: StageBreakdown | string | null | undefined): StageBreakdown => {
   if (!raw) return {};
   if (typeof raw === 'string') {
     try {
@@ -46,112 +46,91 @@ const parseStages = (
   return raw;
 };
 
-const minutesToHM = (min: number | null | undefined): string => {
-  if (min == null || Number.isNaN(min)) return '—';
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
-  return `${h}h ${m}m`;
-};
-
-// one row in the readiness breakdown list
-function ComponentRow({
-  label,
-  comp,
-}: {
-  label: string;
-  comp: ReadinessComponent | undefined;
-}) {
-  const pct = comp ? Math.round(comp.subscore * 100) : null;
+// a segmented phosphor meter; fill clamps 0..1
+function Bar({ value, color }: { value: number; color: string }) {
+  const pct = Math.max(0, Math.min(1, value)) * 100;
   return (
-    <View style={styles.compRow}>
-      <Text style={styles.compLabel}>{label}</Text>
-      <View style={styles.compBarTrack}>
-        <View
-          style={[
-            styles.compBarFill,
-            {
-              width: `${pct ?? 0}%`,
-              backgroundColor: scoreColor(pct),
-            },
-          ]}
-        />
-      </View>
-      <Text style={styles.compPct}>{pct != null ? `${pct}` : '—'}</Text>
+    <View style={styles.barTrack}>
+      <View style={[styles.barFill, { width: `${pct}%`, backgroundColor: color }]} />
     </View>
   );
 }
 
-export default function TodayScreen() {
+// a bracketed terminal panel with a header label sitting on the top rule
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.panel}>
+      <View style={styles.panelHead}>
+        <Text style={styles.panelTitle}>{title}</Text>
+        <View style={styles.panelRule} />
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function FactorRow({ label, comp }: { label: string; comp: ReadinessComponent | undefined }) {
+  const pct = comp ? Math.round(comp.subscore * 100) : null;
+  return (
+    <View style={styles.factorRow}>
+      <Text style={styles.factorLabel}>{label}</Text>
+      <View style={styles.factorBar}>
+        <Bar value={(pct ?? 0) / 100} color={scoreColor(pct)} />
+      </View>
+      <Text style={styles.factorPct}>{pct != null ? String(pct).padStart(3, ' ') : '---'}</Text>
+    </View>
+  );
+}
+
+export default function StatusScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
 
-  const today = useQuery({
-    queryKey: ['summary', 'today'],
-    queryFn: getToday,
-  });
+  const today = useQuery({ queryKey: ['summary', 'today'], queryFn: getToday });
+  const sync = useMutation({ mutationFn: postSync, onSuccess: () => qc.invalidateQueries() });
 
-  // sync runs the backend pipeline; on success we blow away the cache so every
-  // tab pulls fresh numbers
-  const sync = useMutation({
-    mutationFn: postSync,
-    onSuccess: () => {
-      qc.invalidateQueries();
-    },
-  });
+  const SyncButton = (
+    <Pressable
+      style={[styles.cmd, sync.isPending && styles.cmdBusy]}
+      disabled={sync.isPending}
+      onPress={() => sync.mutate()}
+    >
+      <Text style={styles.cmdText}>{sync.isPending ? '> SYNCING SENSORS…' : '> SYNC SENSORS'}</Text>
+    </Pressable>
+  );
 
   if (today.isLoading) {
     return (
       <View style={styles.fill}>
-        <ActivityIndicator color={colors.accent} />
-        <Text style={styles.dim}>loading today…</Text>
+        <ActivityIndicator color={colors.text} />
+        <Text style={styles.dim}>READING SENSORS…</Text>
       </View>
     );
   }
 
-  // a fresh/empty db returns 404 from /summary/today — that's not a failure,
-  // it's the empty state, so we let the user kick off the very first sync
-  // instead of dead-ending them on the "couldn't reach the server" screen
   const isEmpty =
-    today.isError &&
-    today.error instanceof Error &&
-    /HTTP 404/.test(today.error.message);
+    today.isError && today.error instanceof Error && /HTTP 404/.test(today.error.message);
 
   if (isEmpty) {
     return (
       <View style={styles.fill}>
-        <Text style={styles.errTitle}>No data yet</Text>
-        <Text style={styles.dim}>Tap Sync to pull your first day.</Text>
-        <Pressable
-          style={[styles.syncBtn, sync.isPending && styles.syncBtnBusy]}
-          disabled={sync.isPending}
-          onPress={() => sync.mutate()}
-        >
-          {sync.isPending ? (
-            <ActivityIndicator color={colors.bg} />
-          ) : (
-            <Text style={styles.syncText}>Sync now</Text>
-          )}
-        </Pressable>
-        {sync.isError ? (
-          <Text style={styles.syncErr}>
-            Sync failed:{' '}
-            {sync.error instanceof Error ? sync.error.message : 'unknown'}
-          </Text>
-        ) : null}
+        <Text style={styles.errTitle}>NO DATA ON RECORD</Text>
+        <Text style={styles.dim}>Run a sync to pull your first day.</Text>
+        {SyncButton}
+        {sync.isError ? <Text style={styles.err}>SYNC FAILED</Text> : null}
       </View>
     );
   }
 
-  // reserve the hard-error screen for genuine non-404 failures
   if (today.isError || !today.data) {
     return (
       <View style={styles.fill}>
-        <Text style={styles.errTitle}>Couldn't reach the server</Text>
+        <Text style={styles.errTitle}>NO LINK TO PIP</Text>
         <Text style={styles.dim}>
           {today.error instanceof Error ? today.error.message : 'unknown error'}
         </Text>
-        <Pressable style={styles.retryBtn} onPress={() => today.refetch()}>
-          <Text style={styles.retryText}>Retry</Text>
+        <Pressable style={styles.cmd} onPress={() => today.refetch()}>
+          <Text style={styles.cmdText}>> RETRY</Text>
         </Pressable>
       </View>
     );
@@ -160,140 +139,85 @@ export default function TodayScreen() {
   const { summary, metric, data_as_of } = today.data;
   const stages = parseStages(summary?.stage_breakdown_json);
   const comps = metric?.components;
+  const score = metric?.readiness_custom ?? null;
+  const tint = scoreColor(score);
 
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: insets.bottom + spacing.xxl },
+        { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xxl },
       ]}
     >
-      <Text style={styles.asOf}>Data as of {fmtAsOf(data_as_of)}</Text>
-
-      {/* the centerpiece ring + explanation */}
-      <View style={styles.ringWrap}>
-        <ReadinessRing score={metric?.readiness_custom ?? null} />
+      {/* header rule */}
+      <View style={styles.headRow}>
+        <Text style={styles.head}>STATUS</Text>
+        <Text style={styles.headAsOf}>{fmtAsOf(data_as_of)}</Text>
       </View>
+      <View style={styles.headRule} />
+      <Text style={styles.sub}>VITAL SIGNS // VAULT-DWELLER</Text>
 
-      {metric ? (
-        <Section title="Readiness breakdown">
-          <View style={styles.breakdownCard}>
-            <ComponentRow label="HRV" comp={comps?.hrv} />
-            <ComponentRow label="Resting HR" comp={comps?.resting_hr} />
-            <ComponentRow label="Skin temp" comp={comps?.temp} />
-            <ComponentRow label="Sleep" comp={comps?.sleep} />
-          </View>
-        </Section>
-      ) : (
-        <Text style={styles.dim}>No readiness score for today yet.</Text>
-      )}
+      <StatusFigure
+        readiness={score}
+        hr={summary?.resting_hr}
+        hrv={summary?.hrv_rmssd}
+        temp={summary?.temp_mean_c}
+        spo2={summary?.spo2_avg}
+      />
 
-      <Section title="Vitals">
-        <View style={styles.grid}>
-          <StatCard
-            label="Resting HR"
-            value={summary?.resting_hr}
-            unit="bpm"
-            tint={colors.rhr}
-          />
-          <StatCard
-            label="HRV (rMSSD)"
-            value={summary?.hrv_rmssd}
-            unit="ms"
-            tint={colors.hrv}
-          />
-        </View>
-        <View style={[styles.grid, { marginTop: spacing.md }]}>
-          <StatCard
-            label="Skin temp"
-            value={summary?.temp_mean_c}
-            unit="°C"
-            digits={2}
-            tint={colors.temp}
-          />
-          <StatCard
-            label="SpO2"
-            value={summary?.spo2_avg}
-            unit="%"
-            digits={1}
-            tint={colors.spo2}
-          />
-        </View>
-      </Section>
-
-      <Section title="Last night's sleep">
-        <View style={styles.sleepCard}>
-          <View style={styles.sleepTop}>
-            <Text style={styles.sleepTotal}>
-              {minutesToHM(summary?.sleep_min)}
-            </Text>
-            <Text style={styles.sleepEff}>
-              {summary?.sleep_efficiency != null
-                ? `${Math.round(summary.sleep_efficiency)}% efficient`
-                : 'efficiency —'}
-            </Text>
-          </View>
-          <View style={styles.sleepStages}>
-            <SleepStageChip label="Deep" min={stages.deep_min} tint={colors.sleep} />
-            <SleepStageChip label="REM" min={stages.rem_min} tint={colors.hrv} />
-            <SleepStageChip label="Light" min={stages.light_min} tint={colors.spo2} />
-            <SleepStageChip label="Awake" min={stages.awake_min} tint={colors.textFaint} />
-          </View>
-        </View>
-      </Section>
-
-      <Pressable
-        style={[styles.syncBtn, sync.isPending && styles.syncBtnBusy]}
-        disabled={sync.isPending}
-        onPress={() => sync.mutate()}
-      >
-        {sync.isPending ? (
-          <ActivityIndicator color={colors.bg} />
-        ) : (
-          <Text style={styles.syncText}>Sync now</Text>
-        )}
-      </Pressable>
-      {sync.isError ? (
-        <Text style={styles.syncErr}>
-          Sync failed:{' '}
-          {sync.error instanceof Error ? sync.error.message : 'unknown'}
+      {/* HP-style condition bar */}
+      <View style={styles.condRow}>
+        <Text style={styles.condLabel}>CONDITION</Text>
+        <Text style={[styles.condScore, { color: tint }, glow(tint, 10)]}>
+          {score != null ? Math.round(score) : '--'}
         </Text>
+        <Text style={[styles.condWord, { color: tint }]}>{conditionWord(score)}</Text>
+      </View>
+      <Bar value={(score ?? 0) / 100} color={tint} />
+
+      {comps ? (
+        <Panel title="READINESS FACTORS">
+          <FactorRow label="HRV" comp={comps.hrv} />
+          <FactorRow label="RESTING HR" comp={comps.resting_hr} />
+          <FactorRow label="SKIN TEMP" comp={comps.temp} />
+          <FactorRow label="SLEEP" comp={comps.sleep} />
+        </Panel>
       ) : null}
+
+      <Panel title="LAST REST CYCLE">
+        <View style={styles.restRow}>
+          <Text style={styles.restBig}>{minutesToHM(summary?.sleep_min)}</Text>
+          <Text style={styles.restEff}>
+            {summary?.sleep_efficiency != null
+              ? `${Math.round(summary.sleep_efficiency)}% EFF`
+              : '-- EFF'}
+          </Text>
+        </View>
+        <View style={styles.restStages}>
+          <Text style={styles.restStage}>DEEP {Math.round(stages.deep_min ?? 0)}</Text>
+          <Text style={styles.restStage}>REM {Math.round(stages.rem_min ?? 0)}</Text>
+          <Text style={styles.restStage}>LIGHT {Math.round(stages.light_min ?? 0)}</Text>
+          <Text style={styles.restStage}>AWAKE {Math.round(stages.awake_min ?? 0)}</Text>
+        </View>
+      </Panel>
+
+      {SyncButton}
+      {sync.isError ? <Text style={styles.err}>SYNC FAILED</Text> : null}
       {sync.isSuccess ? (
-        <Text style={styles.syncOk}>
+        <Text style={styles.ok}>
           {sync.data.mode === 'synthetic'
-            ? `Generated a synthetic day (+${sync.data.ingested} records)`
-            : `Synced (+${sync.data.ingested} new, ${sync.data.deduped} dup)`}
+            ? `SIM DAY GENERATED (+${sync.data.ingested})`
+            : `SYNCED (+${sync.data.ingested} NEW / ${sync.data.deduped} DUP)`}
         </Text>
       ) : null}
     </ScrollView>
   );
 }
 
-function SleepStageChip({
-  label,
-  min,
-  tint,
-}: {
-  label: string;
-  min: number | undefined;
-  tint: string;
-}) {
-  return (
-    <View style={styles.stageChip}>
-      <View style={[styles.stageDot, { backgroundColor: tint }]} />
-      <Text style={styles.stageLabel}>{label}</Text>
-      <Text style={styles.stageMin}>
-        {min != null ? `${Math.round(min)}m` : '—'}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, paddingTop: spacing.lg },
+  content: { padding: spacing.lg },
   fill: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -302,92 +226,62 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.sm,
   },
-  dim: { color: colors.textDim, fontSize: font.small, textAlign: 'center' },
-  errTitle: { color: colors.text, fontSize: font.title, fontWeight: '700' },
-  retryBtn: {
-    marginTop: spacing.md,
+  dim: { color: colors.textDim, fontSize: font.small, textAlign: 'center', letterSpacing: 1 },
+  err: { color: colors.bad, fontSize: font.small, textAlign: 'center', marginTop: spacing.sm },
+  ok: { color: colors.good, fontSize: font.small, textAlign: 'center', marginTop: spacing.sm },
+  errTitle: { color: colors.text, fontFamily: fonts.display, fontSize: font.title },
+
+  headRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  head: { color: colors.text, fontFamily: fonts.display, fontSize: 44, lineHeight: 46, ...glow() },
+  headAsOf: { color: colors.textDim, fontSize: font.tiny, marginBottom: 6, letterSpacing: 1 },
+  headRule: { height: 2, backgroundColor: colors.border, marginVertical: spacing.xs },
+  sub: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 2, marginBottom: spacing.md },
+
+  condRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, marginTop: spacing.lg },
+  condLabel: { color: colors.textDim, fontSize: font.small, letterSpacing: 1, flex: 1 },
+  condScore: { fontFamily: fonts.display, fontSize: 48, lineHeight: 50 },
+  condWord: { fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 1 },
+
+  barTrack: {
+    height: 14,
     backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: spacing.sm,
+    padding: 2,
+  },
+  barFill: { height: '100%' },
+
+  panel: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  panelHead: { marginBottom: spacing.sm },
+  panelTitle: { color: colors.textDim, fontSize: font.small, letterSpacing: 2 },
+  panelRule: { height: 1, backgroundColor: colors.border, marginTop: spacing.xs },
+
+  factorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: 5 },
+  factorLabel: { color: colors.textDim, fontSize: font.small, width: 92 },
+  factorBar: { flex: 1 },
+  factorPct: { color: colors.text, fontSize: font.small, width: 36, textAlign: 'right' },
+
+  restRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  restBig: { color: colors.text, fontFamily: fonts.display, fontSize: font.big },
+  restEff: { color: colors.textDim, fontSize: font.small, letterSpacing: 1 },
+  restStages: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
+  restStage: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1 },
+
+  cmd: {
+    borderWidth: 1,
+    borderColor: colors.text,
     paddingVertical: spacing.md,
-    borderRadius: radius.pill,
-  },
-  retryText: { color: colors.accent, fontWeight: '700' },
-  asOf: {
-    color: colors.textFaint,
-    fontSize: font.small,
-    textAlign: 'center',
-    marginBottom: spacing.md,
-  },
-  ringWrap: { alignItems: 'center', marginVertical: spacing.lg },
-  breakdownCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  compRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  compLabel: { color: colors.textDim, fontSize: font.small, width: 86 },
-  compBarTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-    overflow: 'hidden',
-  },
-  compBarFill: { height: 8, borderRadius: radius.pill },
-  compPct: {
-    color: colors.text,
-    fontSize: font.small,
-    fontWeight: '700',
-    width: 28,
-    textAlign: 'right',
-  },
-  grid: { flexDirection: 'row', gap: spacing.md },
-  sleepCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-  },
-  sleepTop: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  sleepTotal: { color: colors.text, fontSize: font.big, fontWeight: '800' },
-  sleepEff: { color: colors.textDim, fontSize: font.small },
-  sleepStages: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  stageChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  stageDot: { width: 10, height: 10, borderRadius: 5 },
-  stageLabel: { color: colors.textDim, fontSize: font.small },
-  stageMin: { color: colors.text, fontSize: font.small, fontWeight: '700' },
-  syncBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.pill,
-    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.xl,
   },
-  syncBtnBusy: { opacity: 0.7 },
-  syncText: { color: colors.bg, fontSize: font.body, fontWeight: '800' },
-  syncErr: {
-    color: colors.bad,
-    fontSize: font.small,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  syncOk: {
-    color: colors.good,
-    fontSize: font.small,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
+  cmdBusy: { opacity: 0.6, borderColor: colors.textDim },
+  cmdText: { color: colors.text, fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 1 },
 });

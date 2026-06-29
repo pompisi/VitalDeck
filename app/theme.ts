@@ -1,25 +1,57 @@
-// a small dark palette + spacing/radius tokens; everything visual pulls from
-// here so the screens stay consistent and easy to retune in one place
-export const colors = {
-  bg: '#0b0f14',
-  surface: '#141b24',
-  surfaceAlt: '#1c2733',
-  border: '#243140',
-  text: '#e8eef5',
-  textDim: '#9bb0c4',
-  textFaint: '#5e7388',
-  accent: '#4dd0e1',
-  good: '#5bd99a',
-  warn: '#f5c451',
-  bad: '#ef6b6b',
-  // per-metric tints reused across cards + charts
-  hrv: '#7c9cf0',
-  rhr: '#ef6b6b',
-  temp: '#f5a05b',
-  spo2: '#4dd0e1',
-  sleep: '#a78bfa',
-  band: 'rgba(124,156,240,0.14)',
+// pip-boy CRT palettes. two phosphor variants — green (the classic Fallout look,
+// default) and amber — kept as named palettes so the in-app toggle can flip
+// between them. every screen pulls its colors from these token NAMES.
+
+const green = {
+  bg: '#02110a',          // near-black, green tint (the dead CRT)
+  surface: '#06200f',     // panel glass
+  surfaceAlt: '#0a2c16',  // raised panel
+  border: '#1f7a43',      // dim phosphor rule
+  text: '#2bff88',        // phosphor green — the main glow
+  textDim: '#1faf5e',     // recessed green
+  textFaint: '#15703f',   // ghosted green
+  accent: '#7dffb0',      // bright highlight
+  good: '#5dffa0',        // high readiness
+  warn: '#ffe066',        // amber-yellow (middling)
+  bad: '#ff6b5a',         // red (low / strain)
+  hrv: '#7dffb0',
+  rhr: '#ff8a6a',
+  temp: '#ffd16a',
+  spo2: '#5de0ff',
+  sleep: '#9bff7a',
+  band: 'rgba(43,255,136,0.14)',
+  scanline: 'rgba(0,0,0,0.32)',
+  glow: 'rgba(43,255,136,0.55)',
 } as const;
+
+const amber = {
+  bg: '#0a0701',
+  surface: '#140d02',
+  surfaceAlt: '#1d1404',
+  border: '#6b5214',
+  text: '#ffb642',
+  textDim: '#b9852a',
+  textFaint: '#7a5c1d',
+  accent: '#ffc864',
+  good: '#b9e84f',
+  warn: '#ffb642',
+  bad: '#ff6a3d',
+  hrv: '#ffd479',
+  rhr: '#ff7a4d',
+  temp: '#ffa23c',
+  spo2: '#86e0b0',
+  sleep: '#d8b24a',
+  band: 'rgba(255,182,66,0.14)',
+  scanline: 'rgba(0,0,0,0.32)',
+  glow: 'rgba(255,182,66,0.55)',
+} as const;
+
+export type PaletteName = 'green' | 'amber';
+export const palettes: Record<PaletteName, typeof green> = { green, amber };
+
+// the active palette. green by default (classic Fallout); the ThemeProvider
+// swaps this for a live toggle in the next pass. screens still read `colors`.
+export const colors = green;
 
 export const spacing = {
   xs: 4,
@@ -30,20 +62,27 @@ export const spacing = {
   xxl: 32,
 } as const;
 
+// sharp corners read more "terminal" than rounded; keep radii tight
 export const radius = {
-  sm: 8,
-  md: 12,
-  lg: 18,
+  sm: 2,
+  md: 4,
+  lg: 6,
   pill: 999,
 } as const;
 
+// VT323 + Share Tech Mono render small per point, so the scale runs larger
 export const font = {
-  hero: 56,
-  title: 22,
-  big: 30,
-  body: 15,
-  small: 13,
-  tiny: 11,
+  hero: 84,
+  title: 26,
+  big: 40,
+  body: 17,
+  small: 15,
+  tiny: 13,
+} as const;
+
+export const fonts = {
+  display: 'VT323_400Regular',
+  mono: 'ShareTechMono_400Regular',
 } as const;
 
 // mapping a 0-100 readiness/subscore onto the good/warn/bad ramp
@@ -53,3 +92,10 @@ export const scoreColor = (score: number | null | undefined): string => {
   if (score >= 50) return colors.warn;
   return colors.bad;
 };
+
+// a reusable phosphor text-glow — the cheap, Expo-Go-friendly look
+export const glow = (color: string = colors.text, radius = 8) => ({
+  textShadowColor: color,
+  textShadowOffset: { width: 0, height: 0 },
+  textShadowRadius: radius,
+});
