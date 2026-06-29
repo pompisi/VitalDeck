@@ -81,16 +81,22 @@ carries an honest AI-assisted-dev disclosure.
   phosphor at runtime). To swap in the real mascot: generate a monochrome
   white-on-transparent PNG (ChatGPT/Gemini; original — NOT Vault Boy), save it over
   that path, and `eas update` — no code change. STATUS still uses the old pixel
-  `StatusFigure.tsx` (placement chosen = boot-screen only).
+  `StatusFigure.tsx` (placement chosen = boot-screen only). REAL ART IN PLACE
+  2026-06-29: GPT-generated waving atomic-age technician, baked phosphor-green
+  (luminance-preserving) into `app/assets/character.png`; white-on-transparent
+  original kept at `app/assets/character_src.png` for future re-tinting (amber).
 - [x] **Sleep stages read 0** on STATUS — FIXED in
   `backend/vitaldeck/ingest/oura_api.py`. Field names were already correct; the
   night-picker now prefers records that actually have staging, and a
   `sleep_phase_5_min` hypnogram fallback (1=deep 2=light 3=rem 4=awake, 5min/char)
   derives deep/rem/light/awake — and finally populates `stages_json` — when the
   explicit `*_duration` fields come back null. Tests added in
-  `backend/tests/test_oura_api.py`. ⚠️ If a night has NEITHER durations NOR a
-  hypnogram it's unrecoverable; confirm against real data (`/sync`, then check
-  STATUS, or inspect the Pi DB).
+  `backend/tests/test_oura_api.py`. DEPLOYED + VERIFIED LIVE 2026-06-29 (Pi pulled,
+  restarted, `/sync` re-ingested): current nights show real stages
+  (e.g. 06-28 deep86/rem118/light196) and `stages_json` is now populated
+  (`has_stages` 0→1). The original "reads 0" was an earlier trial night; the Oura
+  API now returns full durations + hypnograms. ⚠️ Still: a night with NEITHER
+  durations NOR a hypnogram is unrecoverable via the API.
 - [ ] **Snoop-log VALIDATION artifact** (decoder vs API, the RE centerpiece) — capture
   via SysDump (`docs/SAMSUNG_SNOOP_FINDING.md`) → `python -m tools.ingest_zip <zip>` +
   `python -m tools.validate <zip>` → `docs/VALIDATION.md`. Parked.
