@@ -20,6 +20,12 @@ backend/captures/
 *.realm
 secrets/
 .env
+.env.*
+!.env.example
+
+# local-only notes (Pi IP, SSH, tailnet addresses, etc.) — never commit
+INFRA.local.md
+*.local.md
 
 # vendored open_ring lives here on the Pi; not committed from this machine
 backend/vendor/open_ring/

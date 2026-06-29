@@ -3,6 +3,7 @@
 // Pi), the chosen STATUS character, and whether boot/UI sound plays. values are
 // hydrated once at startup into in-memory caches so reads are synchronous.
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { useSyncExternalStore } from 'react';
 import type { CharacterKey } from './characters';
 
@@ -10,9 +11,14 @@ const KEY_API_URL = 'vitaldeck.apiUrl';
 const KEY_CHARACTER = 'vitaldeck.character';
 const KEY_SOUND = 'vitaldeck.sound';
 
-// in-app value > EXPO_PUBLIC_API_URL > the Pi's Tailscale url baked in as default
+// the default backend url is injected at build/OTA time from app/app.config.js
+// (extra.apiUrl, sourced from the gitignored VITALDECK_API_URL) so the real Pi
+// address is NEVER committed to the public repo. an in-app SET value (persisted)
+// overrides it; '' if nothing is configured (the SET tab then prompts for one).
 export const DEFAULT_API_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://100.113.92.26:8000';
+  (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ||
+  process.env.EXPO_PUBLIC_API_URL ||
+  '';
 
 const DEFAULT_CHARACTER: CharacterKey = 'operative';
 const KNOWN_CHARACTERS: readonly string[] = ['operative', 'wizard'];

@@ -19,14 +19,13 @@ OTA updates working; 78 backend tests green.
   `docs/PHASE0_RUNBOOK.md`, `docs/SAMSUNG_SNOOP_FINDING.md`, `CONTRACTS.md`.
 
 ## Infra / access
-- Pi: Tailscale `100.113.92.26`, host `raspberrypi`, user `pompisi` (passwordless sudo).
-  SSH from any tailnet device: `ssh pompisi@100.113.92.26`. Dev PC `desktop1` =
-  100.114.118.90. Phone `dereks-s26-ultra` = 100.82.223.127 (Tailscale must be ON for
-  the app to reach the Pi).
-- Service: `sudo systemctl {status|restart} vitaldeck`; logs `journalctl -u vitaldeck -f`.
-  Auto-starts on boot; uvicorn :8000; auto-syncs the Oura API at 08:00 / 20:00.
-- Oura token: `/home/pompisi/vitaldeck-secrets.env` (gitignored, 0600; systemd
-  EnvironmentFile). NEVER commit it. Revoke/rotate at cloud.ouraring.com.
+- The Pi's Tailscale IP, SSH user/host, secrets path, and tailnet device addresses
+  are kept OUT of this public repo. They live in `INFRA.local.md` (gitignored) and in
+  Claude's cross-session memory. Tailscale must be ON for the app to reach the Pi.
+- Service (on the Pi): `sudo systemctl {status|restart} vitaldeck`; logs
+  `journalctl -u vitaldeck -f`. uvicorn :8000; auto-syncs the Oura API at 08:00 / 20:00.
+- Oura token lives in a gitignored env file on the Pi (systemd EnvironmentFile, 0600).
+  NEVER commit it. Revoke/rotate at cloud.ouraring.com.
 - EAS: project `@pompisi/vitaldeck`, logged in as `pompisi`.
 
 ## How to ship a change (OTA — the daily workflow, NO rebuild)
@@ -37,10 +36,11 @@ npx eas-cli@latest update --branch preview --platform android --message "what ch
 ```
 Then on the phone: close + reopen the app TWICE (downloads in bg, applies on next
 cold start). Installed APK is on channel `preview`, runtime `0.1.0`.
-- The Pi URL is HARDCODED as the default in `app/lib/api.ts`
-  (`http://100.113.92.26:8000`). Do NOT rely on `EXPO_PUBLIC_API_URL` — it does NOT
-  inline into `eas update` bundles (that cost us hours). If the Pi IP changes, edit
-  that one line.
+- The default backend URL is injected at build/OTA time from `app/.env`
+  (`VITALDECK_API_URL`, gitignored) via `app/app.config.js` → `extra.apiUrl`, read in
+  `app/lib/settings.ts`. It is NOT committed to the repo. Override per-device in the
+  in-app SET tab. To repoint the Pi: edit `app/.env`, then `eas update`. (Don't rely
+  on `EXPO_PUBLIC_API_URL` for OTA — it doesn't inline into `eas update` bundles.)
 
 ## When you MUST rebuild the APK (native/manifest changes only)
 Only for new native deps, permissions, cleartext, icon — NOT for JS/UI.
