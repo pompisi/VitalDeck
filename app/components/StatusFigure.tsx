@@ -1,8 +1,7 @@
-// an ORIGINAL pip-boy-style operative figure (no bethesda assets). a schematic
-// humanoid silhouette whose color tracks readiness (green = recovered, amber =
-// fair, red = strained), flanked by limb-indicator callouts for the headline
-// vitals. the chest heart node pulses at the actual heart rate and shifts color
-// by HR threshold (calm green -> elevated red).
+// an ORIGINAL pixel-art operative sprite (no Bethesda assets) — a grid of squares
+// forming a humanoid, tinted by readiness (green=recovered, amber=fair, red=
+// strained). flanked by limb-indicator callouts for the headline vitals. the
+// chest heart pixel pulses at the actual heart rate and shifts color by HR.
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -13,42 +12,59 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Line, Path } from 'react-native-svg';
+import Svg, { G, Rect } from 'react-native-svg';
 import { colors, font, fonts, scoreColor } from '../theme';
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const AnimatedG = Animated.createAnimatedComponent(G);
+const CELL = 9;
+
+// the sprite. '@' = head, '#' = body/limbs, ' '/'.' = empty. 13 cols x 16 rows.
+const SPRITE = [
+  '....@@@@@....',
+  '...@@@@@@@...',
+  '...@@@@@@@...',
+  '....@@@@@....',
+  '......#......',
+  '..#########..',
+  '#.#########.#',
+  '#.#########.#',
+  '#.#########.#',
+  '..#########..',
+  '...#######...',
+  '...##...##...',
+  '...##...##...',
+  '...##...##...',
+  '...##...##...',
+  '..###...###..',
+];
+const COLS = 13;
+const ROWS = SPRITE.length;
+
+// heart pixels (a small plus) at the chest — placed viewer-right of center, i.e.
+// the person's left, where a real heart sits.
+const HEART_CELLS: [number, number][] = [[8, 6], [7, 7], [8, 7], [9, 7], [8, 8]];
 
 const fmt = (v: number | null | undefined, digits = 0): string => {
   if (v == null || Number.isNaN(v)) return '--';
   return digits > 0 ? v.toFixed(digits) : String(Math.round(v));
 };
 
-// heart node color by (resting) heart rate — lower is calmer. tweak freely.
 const hrColor = (hr: number | null | undefined): string => {
   if (hr == null || Number.isNaN(hr)) return colors.textDim;
-  if (hr <= 60) return colors.good; // calm
-  if (hr <= 75) return colors.warn; // elevated
-  return colors.bad; // high
+  if (hr <= 60) return colors.good;
+  if (hr <= 75) return colors.warn;
+  return colors.bad;
 };
 
-// one on-screen beat per heartbeat, clamped so extremes stay watchable
 const heartPeriod = (hr: number | null | undefined): number => {
   const bpm = hr && hr > 30 ? hr : 60;
   return Math.max(600, Math.min(1400, 60000 / bpm));
 };
 
 function Callout({
-  label,
-  value,
-  unit,
-  digits = 0,
-  side,
+  label, value, unit, digits = 0, side,
 }: {
-  label: string;
-  value: number | null | undefined;
-  unit: string;
-  digits?: number;
-  side: 'left' | 'right';
+  label: string; value: number | null | undefined; unit: string; digits?: number; side: 'left' | 'right';
 }) {
   const dash = <View style={styles.dash} />;
   return (
@@ -65,11 +81,7 @@ function Callout({
 }
 
 export default function StatusFigure({
-  readiness,
-  hr,
-  hrv,
-  temp,
-  spo2,
+  readiness, hr, hrv, temp, spo2,
 }: {
   readiness: number | null | undefined;
   hr: number | null | undefined;
@@ -78,11 +90,9 @@ export default function StatusFigure({
   spo2: number | null | undefined;
 }) {
   const tint = scoreColor(readiness);
-  const fill = colors.surfaceAlt;
   const heartFill = hrColor(hr);
   const period = heartPeriod(hr);
 
-  // 0 at rest, spikes to 1 on the beat then eases back — a real-ish cardiac pulse
   const beat = useSharedValue(0);
   useEffect(() => {
     beat.value = withRepeat(
@@ -94,11 +104,28 @@ export default function StatusFigure({
       false,
     );
   }, [beat, period]);
+  const heartProps = useAnimatedProps(() => ({ opacity: 0.5 + beat.value * 0.5 }));
 
-  const heartProps = useAnimatedProps(() => ({
-    r: 5 + beat.value * 3,
-    opacity: 0.5 + beat.value * 0.5,
-  }));
+  // build the body pixels from the sprite grid
+  const pixels: React.ReactNode[] = [];
+  for (let r = 0; r < ROWS; r++) {
+    const row = SPRITE[r];
+    for (let c = 0; c < COLS; c++) {
+      const ch = row[c];
+      if (ch !== '@' && ch !== '#') continue;
+      pixels.push(
+        <Rect
+          key={`${r}-${c}`}
+          x={c * CELL}
+          y={r * CELL}
+          width={CELL - 1}
+          height={CELL - 1}
+          fill={tint}
+          fillOpacity={ch === '@' ? 1 : 0.85}
+        />,
+      );
+    }
+  }
 
   return (
     <View style={styles.row}>
@@ -107,23 +134,20 @@ export default function StatusFigure({
         <Callout label="TEMP" value={temp} unit="°C" digits={1} side="left" />
       </View>
 
-      <Svg width={132} height={230} viewBox="0 0 160 250">
-        <Circle cx={80} cy={30} r={20} stroke={tint} strokeWidth={3} fill={fill} />
-        <Line x1={80} y1={49} x2={80} y2={66} stroke={tint} strokeWidth={9} strokeLinecap="round" />
-        <Path
-          d="M52 66 L108 66 L98 152 L62 152 Z"
-          stroke={tint}
-          strokeWidth={3}
-          fill={fill}
-          strokeLinejoin="round"
-        />
-        <Line x1={56} y1={72} x2={36} y2={150} stroke={tint} strokeWidth={11} strokeLinecap="round" />
-        <Line x1={104} y1={72} x2={124} y2={150} stroke={tint} strokeWidth={11} strokeLinecap="round" />
-        <Line x1={71} y1={150} x2={64} y2={242} stroke={tint} strokeWidth={13} strokeLinecap="round" />
-        <Line x1={89} y1={150} x2={96} y2={242} stroke={tint} strokeWidth={13} strokeLinecap="round" />
-        {/* the beating heart node — anatomically on the person's left, which
-            reads as the RIGHT of center from our front-on view */}
-        <AnimatedCircle cx={92} cy={96} animatedProps={heartProps} fill={heartFill} />
+      <Svg width={118} height={145} viewBox={`0 0 ${COLS * CELL} ${ROWS * CELL}`}>
+        {pixels}
+        <AnimatedG animatedProps={heartProps}>
+          {HEART_CELLS.map(([c, r]) => (
+            <Rect
+              key={`h-${r}-${c}`}
+              x={c * CELL}
+              y={r * CELL}
+              width={CELL - 1}
+              height={CELL - 1}
+              fill={heartFill}
+            />
+          ))}
+        </AnimatedG>
       </Svg>
 
       <View style={styles.col}>
@@ -136,7 +160,7 @@ export default function StatusFigure({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  col: { flex: 1, justifyContent: 'space-around', height: 200, gap: 28 },
+  col: { flex: 1, justifyContent: 'space-around', height: 190, gap: 28 },
   callout: {},
   alignL: { alignItems: 'flex-start' },
   alignR: { alignItems: 'flex-end' },
