@@ -9,13 +9,14 @@ thread" territory. the app object MUST be named `app` so
 from __future__ import annotations
 
 import sqlite3
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Iterator, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from vitaldeck import config
+from vitaldeck import pipeline
 from vitaldeck import summarize
 from vitaldeck.db import store
 from vitaldeck.metrics import baselines as baselines_mod
@@ -51,7 +52,27 @@ TREND_BASELINE_KEY = {
 }
 VALID_TREND_METRICS = set(SUMMARY_TREND_COLUMNS) | {"readiness_custom"}
 
-app = FastAPI(title="VitalDeck", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(_app: "FastAPI"):
+    # start the twice-daily auto-sync when a real source (oura token / adb) is
+    # configured; the scheduler itself no-ops in synthetic/dev. lazy import keeps
+    # the module graph clean. wrapped so a scheduler hiccup never blocks the api.
+    try:
+        from vitaldeck import scheduler
+
+        scheduler.start()
+    except Exception as exc:
+        print(f"[api] scheduler start failed: {exc}")
+    yield
+    try:
+        from vitaldeck import scheduler
+
+        scheduler.shutdown()
+    except Exception as exc:
+        print(f"[api] scheduler shutdown failed: {exc}")
+
+
+app = FastAPI(title="VitalDeck", version="0.1.0", lifespan=_lifespan)
 
 # wide-open CORS — this only ever runs on a personal LAN / Tailscale net, so the
 # convenience of any-origin beats locking it down here.
@@ -504,43 +525,14 @@ def _sync_oura() -> dict[str, Any]:
 
 
 def _recompute(conn: sqlite3.Connection) -> None:
-    """raw-based paths (synthetic/live): rebuild daily_summaries + sleep from
-    raw_records, then score off the fresh baselines."""
-    try:
-        summarize.rebuild_all(conn)
-    except Exception as exc:
-        print(f"[api] rebuild_all failed: {exc}")
-        return
-    _score_only(conn)
+    """raw-based paths (synthetic / live snoop / manual zip): delegate to the
+    shared pipeline so the CLIs reuse the exact same rebuild+score."""
+    pipeline.recompute(conn)
 
 
 def _score_only(conn: sqlite3.Connection) -> None:
-    """recompute readiness for the recent days off whatever daily_summaries are
-    currently stored — WITHOUT rebuilding them (the oura path upserts its own).
-
-    compute_baselines over the slice up to and including each day keeps the
-    baseline causal (no peeking at future days)."""
-    try:
-        summaries = store.get_daily_summaries(conn, 60)
-    except Exception as exc:
-        print(f"[api] get_daily_summaries (recompute) failed: {exc}")
-        return
-
-    for i, today in enumerate(summaries):
-        try:
-            window = summaries[: i + 1]
-            bl = baselines_mod.compute_baselines(window)
-            scored = readiness_mod.compute_readiness(today, bl)
-            store.upsert_metric(
-                conn,
-                today.get("date"),
-                scored.get("score"),
-                scored.get("components", {}),
-                bl,
-            )
-        except Exception as exc:
-            print(f"[api] readiness recompute for {today.get('date')} failed: {exc}")
-            continue
+    """oura path: score the upserted daily_summaries without a rebuild."""
+    pipeline.score_only(conn)
 
 
 def _as_float(value: Any) -> Optional[float]:

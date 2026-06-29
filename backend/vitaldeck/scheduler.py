@@ -39,8 +39,9 @@ def _job() -> None:
 
 
 def _is_dev() -> bool:
-    """dev/synthetic mode == no real device to pull from."""
-    return not config.ADB_TARGET
+    """dev/synthetic == no real data source configured (neither the oura api
+    token nor an adb target). when either is set, the twice-daily auto-sync runs."""
+    return not config.OURA_TOKEN and not config.ADB_TARGET
 
 
 def start() -> Optional["BackgroundScheduler"]:
