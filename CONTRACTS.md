@@ -48,6 +48,15 @@ Day grouping: a record belongs to local day `floor((t_event_ms/1000 + offset)/86
 where `offset = config.LOCAL_UTC_OFFSET_HOURS*3600`. A sleep session's `date` is
 the local date of its `end_ms`.
 
+> The canonical record model above is the BLE/snoop ingest contract. The active
+> data path today is the **Oura Cloud API** (`vitaldeck/ingest/oura_api.py`),
+> which upserts `daily_summaries` + `sleep_sessions` directly and does NOT write
+> `raw_records`. The snoop/replay path (`decode.py` + `pull_snoop.py`, §5) is the
+> subscription-free alternative and is parked pending a captured validation
+> artifact. The wire-protocol reverse-engineering is credited to open_ring
+> (GPLv3, driven via subprocess); the contribution here is the systems
+> integration, data pipeline, full-stack app, and infra.
+
 ---
 
 ## 2. `vitaldeck/db/store.py`  (owner: AGENT-DB)
@@ -105,6 +114,11 @@ met_high_min). `resting_hr` = ~5th percentile of asleep heart_rate that day.
 Sleep sessions built from contiguous `sleep_stage` runs; efficiency =
 asleep_min/(asleep_min+awake_min)*100; latency = start to first non-awake.
 
+> `summarize.rebuild_all` is only run for the raw-record paths (synthetic / snoop
+> replay / manual zip). The Oura-cloud path writes `daily_summaries` directly and
+> is scored WITHOUT a rebuild (a rebuild would wipe them, since `raw_records` is
+> empty under that path) — see §6 and `pipeline.score_only`.
+
 ---
 
 ## 4. `vitaldeck/metrics/baselines.py` + `readiness.py`  (owner: AGENT-METRICS)
@@ -134,6 +148,9 @@ def temp_flag(today: dict, baselines: dict) -> dict
 
 ## 5. `vitaldeck/ingest/decode.py` + `pull_snoop.py`  (owner: AGENT-INGEST)
 
+The subscription-free / passive-decode path. Parked pending a captured
+validation artifact; the Oura Cloud path (`oura_api.py`, §6) is the active one.
+
 ```python
 # decode.py
 class DecodeError(RuntimeError): ...
@@ -154,28 +171,53 @@ def pull_and_extract(...) -> Path                      # convenience: bugreport 
 All adb/zip/subprocess calls wrapped defensively; raise PullError with context.
 Do NOT require root anywhere. Reference: AOSP btsnooz format = base64{ 1 version byte + raw(v2)/zlib(v1) deflate{ records } }.
 
+### `vitaldeck/ingest/oura_api.py`  (the active ingest path)
+
+Stdlib-only (urllib) pull of the Oura Cloud v2 API with a personal access token.
+Maps `sleep`, `daily_readiness`, `daily_spo2`, `daily_activity` onto our
+`daily_summaries` + `sleep_sessions` so the same baselines/readiness math runs
+regardless of source. Sleep staging prefers the explicit `*_duration` fields and
+falls back to the `sleep_phase_5_min` hypnogram when those are null.
+
+```python
+class OuraError(RuntimeError): ...
+def fetch(token: str, days: int = 30) -> dict[str, list[dict]]    # sleep + daily_* rows
+def build(payload) -> dict[str, list[dict]]                       # pure mapping -> {"daily":[...], "sleep":[...]}
+def ingest_oura(conn, token: str, days: int = 30) -> dict         # fetch -> build -> upsert; -> {"ingested","deduped":0,"sleep_sessions"}
+
+# live heart rate — the ONLY intraday metric the oura cloud exposes
+def fetch_heartrate(token: str, hours: int = 6) -> list[dict]     # /heartrate time series
+def summarize_heartrate(rows) -> dict                             # latest bpm (~2-min smoothed) + day_min/max/avg
+def live_heartrate(token: str, window_hours: int = 6) -> dict     # fetch + summarize; raises OuraError on network failure
+```
+
 ---
 
 ## 6. `vitaldeck/api/main.py` (+ `models.py`)  (owner: AGENT-API)
 
 FastAPI app object name MUST be `app` (so `uvicorn vitaldeck.api.main:app` works).
-Uses store + summarize + metrics. CORS open (personal LAN/Tailscale).
+Uses store + summarize + metrics + pipeline + oura_api. CORS open (personal
+LAN/Tailscale). A lifespan hook starts the twice-daily auto-sync scheduler (no-op
+in synthetic/dev).
 
 | method/path            | response |
 |------------------------|----------|
-| `GET /health`          | `{"status":"ok","db":bool,"data_as_of":int|null}` (data_as_of = latest_event_ms) |
+| `GET /health`          | `{"status":"ok","db":bool,"data_as_of":int|null}` (data_as_of = latest_event_ms, falling back to the newest sleep-session end_ms when there are no raw_records — i.e. the oura path) |
+| `GET /live`            | `{"ok":bool,"bpm":int|null,"ts_ms":int|null,"source":str|null,"day_min":int|null,"day_max":int|null,"day_avg":int|null,"count":int|null,"error":str|null}` — current heart rate from the oura `/heartrate` series; the ONLY intraday metric. Always 200s; `bpm` is null with an `error` when no token / no recent sample. |
 | `GET /summary/today`   | `{"date":str,"summary":{...},"metric":{...}|null,"data_as_of":int|null}` (latest day) |
 | `GET /summary/{date}`  | same shape for a given YYYY-MM-DD (404 if absent) |
-| `GET /trends?metric=&days=30` | `{"metric":str,"points":[{"date":str,"value":float|null}],"baseline_14":float|null,"baseline_30":float|null}` ; metric ∈ {hrv_rmssd,resting_hr,temp_mean_c,sleep_min,spo2_avg,readiness_custom} |
+| `GET /trends?metric=&days=30` | `{"metric":str,"points":[{"date":str,"value":float|null}],"baseline_14":float|null,"baseline_30":float|null}` ; metric ∈ {hrv_rmssd,resting_hr,temp_mean_c,sleep_min,spo2_avg,readiness_custom} (400 on unknown; baseline band only for hrv_rmssd/resting_hr/temp_mean_c) |
 | `GET /sleep?days=30`   | `{"sessions":[sleep_session_dict...]}` |
 | `GET /metrics?days=30` | `{"points":[{"date":str,"readiness_custom":float,"components":{...}}]}` |
 | `GET /tags?days=`      | `{"tags":[{id,ts_ms,label,note,created_at}...]}` |
-| `POST /tags`           | body `{ts_ms:int,label:str,note?:str}` -> created tag |
+| `POST /tags`           | body `{ts_ms:int,label:str,note?:str}` -> created tag (500 if the insert fails) |
 | `DELETE /tags/{id}`    | `{"deleted":bool}` |
-| `POST /sync`           | runs the pipeline; if `config.ADB_TARGET` is empty (dev), fall back to generating one synthetic day via tools.synth + ingest + rebuild + recompute. returns `{"ok":bool,"ingested":int,"deduped":int,"data_as_of":int|null,"mode":"live"|"synthetic"}` |
+| `POST /sync`           | runs the pipeline by source priority — **oura** if `config.OURA_TOKEN` is set (the active path), else **live** (adb/snoop) if `config.ADB_TARGET` is set, else **synthetic** (dev: fabricate one day via tools.synth). Returns `{"ok":bool,"ingested":int,"deduped":int,"data_as_of":int|null,"mode":"oura"|"live"|"synthetic","error":str|null}` (error present only on failure). |
 
-After any ingest, recompute summaries (summarize.rebuild_all) then metrics for the
-affected days (baselines + readiness -> store.upsert_metric).
+After any raw ingest (synthetic / live), recompute via the shared `pipeline.recompute`
+(summarize.rebuild_all -> baselines + readiness -> store.upsert_metric). The oura
+path instead scores in place via `pipeline.score_only` (no rebuild, since
+`raw_records` is empty there).
 
 ---
 
@@ -201,13 +243,35 @@ reproducible.
 
 ## 8. `app/` Expo (TypeScript)  (owner: AGENT-APP)
 
-Stack: Expo + expo-router + TanStack Query + react-native-gifted-charts.
-`lib/api.ts` typed client matching §6. `lib/types.ts` mirrors the JSON shapes.
-Base URL from `EXPO_PUBLIC_API_URL` (Tailscale/LAN), fallback `http://localhost:8000`.
-Screens (expo-router, `app/`): `index.tsx` (Today: readiness ring + HR/HRV/temp/SpO2 +
-last night's sleep + "data as of" + manual refresh -> POST /sync), `trends.tsx`
-(metric picker + line chart with baseline band), `sleep.tsx` (stage breakdown),
-`tags.tsx` (list + add). A `_layout.tsx` with QueryClientProvider + tab nav.
+Stack: Expo SDK 54 + expo-router + TanStack Query + react-native-gifted-charts
+(plus react-native-reanimated, react-native-svg, and expo-audio/expo-haptics/
+expo-image for the boot sequence). CRT/phosphor "Pompisi Studio" theming.
+
+`lib/api.ts` is the typed client matching §6 (includes `getLive()` for `GET /live`).
+`lib/types.ts` mirrors the JSON shapes. `lib/settings.ts` holds runtime-editable
+settings (API base url, STATUS character, sound) in AsyncStorage with a pub/sub so
+views update live. `lib/characters.ts` defines the selectable STATUS character
+(`operative` | `wizard`). `lib/units.ts` converts skin temperature to Fahrenheit
+for display (storage/scoring stay Celsius).
+
+Base URL resolution (NOT hardcoded — the real Pi address is never committed):
+in-app SET value (AsyncStorage) > `app.config.js` `extra.apiUrl` (from the
+gitignored `app/.env` `VITALDECK_API_URL`) > `EXPO_PUBLIC_API_URL` > `''` (empty,
+which makes the SET tab prompt for one). Reached over Tailscale.
+
+Screens (expo-router, `app/`) and tabs:
+- `index.tsx` → **STATUS**: Pip-Boy-style home — selectable character figure with
+  vitals, readiness/CONDITION bar, readiness-factors panel, last rest cycle,
+  live-ish current HR + a LIVE badge, a device-local 12h clock, a scrolling status
+  ticker, and a terminal-style SYNC command (POST /sync).
+- `trends.tsx` → **TRENDS**: metric picker + line chart with baseline band.
+- `sleep.tsx` → **SLEEP**: stage breakdown.
+- `tags.tsx` → **LOG**: tag list + add.
+- `settings.tsx` → **SET**: API base url, STATUS character toggle, boot-sound toggle.
+- `_layout.tsx`: QueryClientProvider + tab nav + an animated boot/power-on
+  sequence (the "Pompisi Studio" command-prompt logo types on, then an INITIALIZE
+  button) and a CRT scanline/vignette overlay.
+
 Do NOT run npm install (heavy + OneDrive); just author correct source + package.json.
 
 ---
@@ -226,8 +290,8 @@ passive decode, batch-not-live, scores-on-phone-not-cloud, no Oura FDA AFib).
 
 - AGENT-DB: `backend/vitaldeck/db/store.py`, `backend/tests/test_store.py`
 - AGENT-METRICS: `backend/vitaldeck/summarize.py`, `backend/vitaldeck/metrics/baselines.py`, `backend/vitaldeck/metrics/readiness.py`, `backend/tests/test_metrics.py`, `backend/tests/test_summarize.py`
-- AGENT-INGEST: `backend/vitaldeck/ingest/decode.py`, `backend/vitaldeck/ingest/pull_snoop.py`, `backend/tests/test_decode.py`, `backend/tests/test_pull_snoop.py`
-- AGENT-API: `backend/vitaldeck/api/main.py`, `backend/vitaldeck/api/models.py`, `backend/vitaldeck/scheduler.py`, `backend/tests/test_api.py`
+- AGENT-INGEST: `backend/vitaldeck/ingest/decode.py`, `backend/vitaldeck/ingest/pull_snoop.py`, `backend/vitaldeck/ingest/oura_api.py`, `backend/tests/test_decode.py`, `backend/tests/test_pull_snoop.py`
+- AGENT-API: `backend/vitaldeck/api/main.py`, `backend/vitaldeck/api/models.py`, `backend/vitaldeck/pipeline.py`, `backend/vitaldeck/scheduler.py`, `backend/tests/test_api.py`
 - AGENT-SYNTH: `backend/tools/synth.py`, `backend/tools/seed.py`, `backend/tools/__init__.py`, `backend/tests/test_synth.py`
 - AGENT-APP: everything under `app/`
 - AGENT-DOCS: everything under `docs/`, plus top-level `README.md`
