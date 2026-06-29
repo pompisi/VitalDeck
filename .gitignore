@@ -1,0 +1,36 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+
+# captures (snoop logs / bugreports can contain personal bluetooth traffic — never commit)
+backend/captures/
+*.btsnoop
+*.log
+!.gitkeep
+
+# secrets — auth keys / realm dumps for the (out-of-scope) live mode must never land in git
+*.auth_key
+*.realm
+secrets/
+.env
+
+# vendored open_ring lives here on the Pi; not committed from this machine
+backend/vendor/open_ring/
+
+# node / expo
+node_modules/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+
+# os
+.DS_Store
+Thumbs.db
