@@ -1,0 +1,23 @@
+# systemd unit for the VitalDeck backend.
+# install on the Pi with:
+#   sudo cp deploy/vitaldeck.service /etc/systemd/system/vitaldeck.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now vitaldeck
+# adjust User= and the paths if your checkout/user differ.
+
+[Unit]
+Description=VitalDeck backend (FastAPI, local Oura data)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pompisi
+WorkingDirectory=/home/pompisi/vitaldeck/backend
+Environment=PYTHONPATH=/home/pompisi/vitaldeck/backend
+# for real ring data, also set: Environment=VITALDECK_ADB_TARGET=<host:port>
+ExecStart=/home/pompisi/vitaldeck/backend/.venv/bin/uvicorn vitaldeck.api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
