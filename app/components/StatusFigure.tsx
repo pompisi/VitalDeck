@@ -1,6 +1,6 @@
 // an ORIGINAL pixel-art operative sprite (no Bethesda assets) — a grid of squares
-// forming a humanoid, tinted by readiness (green=recovered, amber=fair, red=
-// strained). flanked by limb-indicator callouts for the headline vitals. the
+// forming a helmeted figure with a visor + boots, tinted by readiness (green=
+// recovered, amber=fair, red=strained), flanked by limb-indicator callouts. the
 // chest heart pixel pulses at the actual heart rate and shifts color by HR.
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -18,31 +18,34 @@ import { colors, font, fonts, scoreColor } from '../theme';
 const AnimatedG = Animated.createAnimatedComponent(G);
 const CELL = 9;
 
-// the sprite. '@' = head, '#' = body/limbs, ' '/'.' = empty. 13 cols x 16 rows.
+// '@' head, '#' body, '-' dark detail (visor slit). 14 cols x 17 rows.
 const SPRITE = [
-  '....@@@@@....',
-  '...@@@@@@@...',
-  '...@@@@@@@...',
-  '....@@@@@....',
-  '......#......',
-  '..#########..',
-  '#.#########.#',
-  '#.#########.#',
-  '#.#########.#',
-  '..#########..',
-  '...#######...',
-  '...##...##...',
-  '...##...##...',
-  '...##...##...',
-  '...##...##...',
-  '..###...###..',
+  '....@@@@@@....',
+  '...@@@@@@@@...',
+  '...@------@...',
+  '...@@@@@@@@...',
+  '....@@@@@@....',
+  '.....####.....',
+  '..##########..',
+  '.############.',
+  '.############.',
+  '.############.',
+  '..##########..',
+  '...########...',
+  '...##....##...',
+  '...##....##...',
+  '...##....##...',
+  '...##....##...',
+  '..###....###..',
 ];
-const COLS = 13;
+const COLS = 14;
 const ROWS = SPRITE.length;
 
-// heart pixels (a small plus) at the chest — placed viewer-right of center, i.e.
-// the person's left, where a real heart sits.
-const HEART_CELLS: [number, number][] = [[8, 6], [7, 7], [8, 7], [9, 7], [8, 8]];
+// per-glyph fill opacity, for a little depth
+const OPACITY: Record<string, number> = { '@': 1, '#': 0.85, '-': 0.28 };
+
+// heart pixels (a small plus) at the chest, viewer-right of center (person's left)
+const HEART_CELLS: [number, number][] = [[8, 8], [7, 9], [8, 9], [9, 9], [8, 10]];
 
 const fmt = (v: number | null | undefined, digits = 0): string => {
   if (v == null || Number.isNaN(v)) return '--';
@@ -106,13 +109,12 @@ export default function StatusFigure({
   }, [beat, period]);
   const heartProps = useAnimatedProps(() => ({ opacity: 0.5 + beat.value * 0.5 }));
 
-  // build the body pixels from the sprite grid
   const pixels: React.ReactNode[] = [];
   for (let r = 0; r < ROWS; r++) {
     const row = SPRITE[r];
     for (let c = 0; c < COLS; c++) {
-      const ch = row[c];
-      if (ch !== '@' && ch !== '#') continue;
+      const op = OPACITY[row[c]];
+      if (op === undefined) continue;
       pixels.push(
         <Rect
           key={`${r}-${c}`}
@@ -121,7 +123,7 @@ export default function StatusFigure({
           width={CELL - 1}
           height={CELL - 1}
           fill={tint}
-          fillOpacity={ch === '@' ? 1 : 0.85}
+          fillOpacity={op}
         />,
       );
     }
@@ -134,18 +136,11 @@ export default function StatusFigure({
         <Callout label="TEMP" value={temp} unit="°C" digits={1} side="left" />
       </View>
 
-      <Svg width={118} height={145} viewBox={`0 0 ${COLS * CELL} ${ROWS * CELL}`}>
+      <Svg width={120} height={146} viewBox={`0 0 ${COLS * CELL} ${ROWS * CELL}`}>
         {pixels}
         <AnimatedG animatedProps={heartProps}>
           {HEART_CELLS.map(([c, r]) => (
-            <Rect
-              key={`h-${r}-${c}`}
-              x={c * CELL}
-              y={r * CELL}
-              width={CELL - 1}
-              height={CELL - 1}
-              fill={heartFill}
-            />
+            <Rect key={`h-${r}-${c}`} x={c * CELL} y={r * CELL} width={CELL - 1} height={CELL - 1} fill={heartFill} />
           ))}
         </AnimatedG>
       </Svg>
