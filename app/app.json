@@ -15,7 +15,16 @@
       "supportsTablet": true
     },
     "android": {
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "web": {
       "bundler": "metro",
@@ -28,6 +37,16 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0fb5ce03-544b-4f37-91a9-d2dcb53644e1"
+      }
+    },
+    "owner": "pompisi",
+    "updates": {
+      "url": "https://u.expo.dev/0fb5ce03-544b-4f37-91a9-d2dcb53644e1"
     }
   }
 }

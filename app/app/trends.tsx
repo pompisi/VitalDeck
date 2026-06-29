@@ -161,7 +161,7 @@ function TrendChart({
   // building the line from only the present points — synthesizing 0 for gap days
   // would collapse the line to the axis (and spike negative under the y-offset),
   // so we drop the missing days entirely and keep the real points' date labels
-  const step = Math.max(1, Math.floor(present.length / 6));
+  const step = Math.max(1, Math.ceil(present.length / 5));
   const chartData = present.map((p, i) => ({
     value: p.value,
     label: i % step === 0 ? safeLabel(p.date) : undefined,
@@ -179,14 +179,24 @@ function TrendChart({
   const dataMax = Math.max(...values, ...(bandHi != null ? [bandHi] : []));
   const pad = (dataMax - dataMin) * 0.15 || 1;
 
+  // a "nice" y-axis: snap the bounds to a clean step so labels read 20/40/60…
+  // instead of 36.7/52.7/… — generalizes across metrics (readiness vs temp).
+  const rawStep = (dataMax + pad - Math.max(0, dataMin - pad)) / 4 || 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const ratio = rawStep / mag;
+  const niceStep = (ratio <= 1 ? 1 : ratio <= 2 ? 2 : ratio <= 5 ? 5 : 10) * mag;
+  const niceMin = Math.max(0, Math.floor((dataMin - pad) / niceStep) * niceStep);
+  const niceMax = Math.ceil((dataMax + pad) / niceStep) * niceStep;
+  const sections = Math.max(2, Math.min(6, Math.round((niceMax - niceMin) / niceStep)));
+
   const latest = present[present.length - 1].value;
 
   return (
     <View>
       <LineChart
         data={chartData}
-        width={width}
-        height={220}
+        width={width - 48}
+        height={210}
         thickness={2.5}
         color={tint}
         dataPointsColor={tint}
@@ -201,14 +211,17 @@ function TrendChart({
         rulesColor={colors.border}
         rulesType="dashed"
         yAxisTextStyle={styles.axisText}
-        xAxisLabelTextStyle={styles.axisText}
+        yAxisLabelWidth={44}
+        xAxisLabelTextStyle={styles.xLabel}
         textColor={colors.text}
         hideOrigin
         initialSpacing={spacing.md}
         endSpacing={spacing.md}
         adjustToWidth
-        maxValue={dataMax + pad}
-        yAxisOffset={Math.max(0, dataMin - pad)}
+        maxValue={niceMax - niceMin}
+        yAxisOffset={niceMin}
+        noOfSections={sections}
+        formatYLabel={(v) => (niceStep >= 1 ? String(Math.round(Number(v))) : Number(v).toFixed(1))}
         curved
         // the two baselines drawn as dim-amber horizontal reference lines
         showReferenceLine1={bandHi != null}
@@ -332,6 +345,13 @@ const styles = StyleSheet.create({
   },
 
   axisText: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny },
+  xLabel: {
+    color: colors.textFaint,
+    fontFamily: fonts.mono,
+    fontSize: font.tiny,
+    width: 40,
+    textAlign: 'center',
+  },
 
   statRule: {
     height: 1,
