@@ -15,10 +15,12 @@ import type {
   TrendsResponse,
 } from './types';
 
-// base url comes from the env (the Pi's Tailscale url in the field); falling
-// back to localhost for a dev box running the api locally
+// base url: env override if set, else the Pi's Tailscale url baked in as the
+// DEFAULT — so the standalone build always reaches the Pi no matter how it was
+// bundled (EXPO_PUBLIC_* doesn't reliably propagate into eas update). a future
+// in-app settings field can make this runtime-editable.
 export const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+  process.env.EXPO_PUBLIC_API_URL ?? 'http://100.113.92.26:8000';
 
 // shared fetch wrapper — does the json parse, http-status check, and turns any
 // thrown network error into a typed result
