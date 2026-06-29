@@ -9,19 +9,14 @@
     "newArchEnabled": true,
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#0b0f14"
+      "backgroundColor": "#02110a"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.pompisi.vitaldeck",
       "edgeToEdgeEnabled": true,
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
-      ],
       "runtimeVersion": {
         "policy": "appVersion"
       }
@@ -33,7 +28,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-audio"
+      ["expo-audio", { "microphonePermission": false }]
     ],
     "experiments": {
       "typedRoutes": true
