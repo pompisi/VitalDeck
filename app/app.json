@@ -16,6 +16,7 @@
     },
     "android": {
       "package": "com.pompisi.vitaldeck",
+      "usesCleartextTraffic": true,
       "edgeToEdgeEnabled": true,
       "runtimeVersion": {
         "policy": "appVersion"
