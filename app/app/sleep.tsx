@@ -1,13 +1,14 @@
-// SLEEP: rest cycles in the pip-boy idiom — the latest session featured up top
-// (big VT323 total time, efficiency/latency readouts, a stacked stage bar with
-// a per-stage legend), then prior sessions as compact terminal rows. data +
-// states preserved from before; this is the restyle.
+// SLEEP: a day explorer. pick a night from the day strip, then see its hypnogram
+// (stage timeline), the stage breakdown (min + % of asleep, Oura-style), the night
+// window/efficiency/latency, and that day's vitals + readiness. tap days to browse
+// history. data: /sleep (sessions, incl. the `stages` timeline) + /summary/{date}.
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
-import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,56 +16,94 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Hypnogram from '../components/Hypnogram';
 import { Panel, ScreenHeader } from '../components/Pip';
-import { getSleep } from '../lib/api';
-import type { SleepSession } from '../lib/types';
-import { colors, font, fonts, glow, spacing } from '../theme';
+import { getSleep, getSummary } from '../lib/api';
+import type { SleepSession, SleepStage } from '../lib/types';
+import { cToF } from '../lib/units';
+import { colors, font, fonts, glow, scoreColor, spacing } from '../theme';
 
-// the four stages in render order, with their tints
-const STAGES: { key: keyof SleepSession; label: string; tint: string }[] = [
-  { key: 'deep_min', label: 'DEEP', tint: colors.sleep },
-  { key: 'rem_min', label: 'REM', tint: colors.hrv },
-  { key: 'light_min', label: 'LIGHT', tint: colors.spo2 },
-  { key: 'awake_min', label: 'AWAKE', tint: colors.textFaint },
-];
+const STAGES = [
+  { stage: 'deep', label: 'DEEP', tint: colors.sleep, isSleep: true },
+  { stage: 'rem', label: 'REM', tint: colors.hrv, isSleep: true },
+  { stage: 'light', label: 'LIGHT', tint: colors.spo2, isSleep: true },
+  { stage: 'awake', label: 'AWAKE', tint: colors.textFaint, isSleep: false },
+] as const;
 
-const num = (v: unknown): number =>
-  typeof v === 'number' && !Number.isNaN(v) ? v : 0;
+const num = (v: unknown): number => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
 
 const minutesToHM = (min: number | null | undefined): string => {
   if (min == null || Number.isNaN(min)) return '--';
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
-  return `${h}H ${m}M`;
+  return h > 0 ? `${h}H ${m}M` : `${m}M`;
 };
 
-const fmtNight = (s: SleepSession): string => {
+const n0 = (v: number | null | undefined): string =>
+  v == null || Number.isNaN(v) ? '--' : String(Math.round(v));
+
+const fmtWindow = (s: SleepSession): string => {
   try {
-    const start = format(new Date(s.start_ms), 'HH:mm');
-    const end = format(new Date(s.end_ms), 'HH:mm');
-    return `${start} → ${end}`;
+    return `${format(new Date(s.start_ms), 'h:mm a')} → ${format(new Date(s.end_ms), 'h:mm a')}`;
   } catch {
-    return s.date.toUpperCase();
+    return s.date;
   }
 };
 
-// the session date is a plain YYYY-MM-DD (Oura's wake-up day). parse it as LOCAL —
-// `new Date('2026-06-28')` would parse as UTC midnight and then render a day early
-// in any timezone west of UTC (e.g. US), which made the latest night read as 06-27.
 const fmtDate = (raw: string): string => {
   try {
-    return format(parseISO(raw), 'yyyy.MM.dd').toUpperCase();
+    return format(parseISO(raw), 'EEE · yyyy.MM.dd').toUpperCase();
   } catch {
     return raw.toUpperCase();
   }
 };
 
+const weekday = (raw: string): string => {
+  try {
+    return format(parseISO(raw), 'EEE').toUpperCase();
+  } catch {
+    return '';
+  }
+};
+const mmdd = (raw: string): string => {
+  try {
+    return format(parseISO(raw), 'MM.dd');
+  } catch {
+    return raw;
+  }
+};
+
+const parseStageList = (raw: SleepStage[] | string | null | undefined): SleepStage[] => {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as SleepStage[];
+    } catch {
+      return [];
+    }
+  }
+  return raw;
+};
+
 export default function SleepScreen() {
   const insets = useSafeAreaInsets();
-  const sleep = useQuery({
-    queryKey: ['sleep', 30],
-    queryFn: () => getSleep(30),
+  const sleep = useQuery({ queryKey: ['sleep', 30], queryFn: () => getSleep(30) });
+  const [selDate, setSelDate] = useState<string | null>(null);
+
+  const sessions = useMemo(
+    () => [...(sleep.data?.sessions ?? [])].sort((a, b) => b.end_ms - a.end_ms),
+    [sleep.data],
+  );
+  const selected = sessions.find((s) => s.date === selDate) ?? sessions[0] ?? null;
+  const dayDate = selected?.date ?? null;
+
+  const day = useQuery({
+    queryKey: ['summary', dayDate],
+    queryFn: () => getSummary(dayDate as string),
+    enabled: !!dayDate,
   });
+
+  const chartW = Dimensions.get('window').width - spacing.lg * 2 - spacing.md * 2;
 
   if (sleep.isLoading) {
     return (
@@ -74,7 +113,6 @@ export default function SleepScreen() {
       </View>
     );
   }
-
   if (sleep.isError || !sleep.data) {
     return (
       <View style={styles.fill}>
@@ -88,9 +126,7 @@ export default function SleepScreen() {
       </View>
     );
   }
-
-  const sessions = sleep.data.sessions ?? [];
-  if (sessions.length === 0) {
+  if (!selected) {
     return (
       <View style={styles.fill}>
         <Text style={styles.errTitle}>NO REST ON RECORD</Text>
@@ -99,116 +135,141 @@ export default function SleepScreen() {
     );
   }
 
-  // the api hands sessions back ascending by date; the latest is the last one,
-  // but guarding by max end_ms in case ordering ever changes
-  const latest = sessions.reduce((a, b) => (b.end_ms > a.end_ms ? b : a));
+  const stageMin: Record<string, number> = {
+    deep: num(selected.deep_min),
+    rem: num(selected.rem_min),
+    light: num(selected.light_min),
+    awake: num(selected.awake_min),
+  };
+  const asleep = stageMin.deep + stageMin.rem + stageMin.light;
+  const inBed = asleep + stageMin.awake;
+  const pct = (x: number) => (asleep > 0 ? Math.round((x / asleep) * 100) : 0);
+  const stageList = parseStageList(selected.stages ?? selected.stages_json);
 
-  const total =
-    num(latest.deep_min) +
-    num(latest.rem_min) +
-    num(latest.light_min) +
-    num(latest.awake_min);
-
-  // prior sessions, newest first, excluding the featured latest
-  const prior = sessions
-    .filter((s) => s !== latest)
-    .sort((a, b) => b.end_ms - a.end_ms);
+  const summ = day.data?.summary;
+  const readiness = day.data?.metric?.readiness_custom ?? null;
+  const tempF = cToF(summ?.temp_mean_c);
 
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={[
         styles.content,
-        {
-          paddingTop: insets.top + spacing.sm,
-          paddingBottom: insets.bottom + spacing.xxl,
-        },
+        { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xxl },
       ]}
     >
       <ScreenHeader title="SLEEP" sub="REST CYCLES // VAULT-DWELLER" />
 
-      {/* the featured latest night */}
-      <Panel title="LATEST CYCLE">
+      {/* day strip — tap to browse past nights */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        {sessions.map((s) => {
+          const active = s.date === selected.date;
+          return (
+            <Pressable
+              key={s.id ?? s.start_ms}
+              onPress={() => setSelDate(s.date)}
+              style={[styles.chip, active && styles.chipActive]}
+            >
+              <Text style={[styles.chipDay, active && styles.chipTextActive]}>{weekday(s.date)}</Text>
+              <Text style={[styles.chipDate, active && styles.chipTextActive]}>{mmdd(s.date)}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <Panel title="REST CYCLE">
         <View style={styles.nightRow}>
           <Ionicons name="moon" size={16} color={colors.sleep} />
-          <Text style={styles.nightWindow}>{fmtNight(latest)}</Text>
-          <Text style={styles.nightDate}>{fmtDate(latest.date)}</Text>
+          <Text style={styles.nightWindow}>{fmtWindow(selected)}</Text>
+          <Text style={styles.nightDate}>{fmtDate(selected.date)}</Text>
         </View>
 
-        <Text style={[styles.big, glow(colors.sleep, 12)]}>
-          {minutesToHM(latest.total_min)}
-        </Text>
-        <Text style={styles.bigLabel}>TIME ASLEEP</Text>
+        <Text style={[styles.big, glow(colors.sleep, 12)]}>{minutesToHM(selected.total_min)}</Text>
+        <Text style={styles.bigLabel}>TIME ASLEEP · IN BED {minutesToHM(inBed)}</Text>
 
         <View style={styles.statRow}>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>
-              {latest.efficiency != null ? `${Math.round(latest.efficiency)}%` : '--'}
-            </Text>
-            <Text style={styles.statLabel}>EFFICIENCY</Text>
-          </View>
+          <Stat label="EFFICIENCY" value={selected.efficiency != null ? `${Math.round(selected.efficiency)}%` : '--'} />
           <View style={styles.statDivider} />
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>
-              {latest.latency_min != null ? `${Math.round(latest.latency_min)}M` : '--'}
-            </Text>
-            <Text style={styles.statLabel}>LATENCY</Text>
+          <Stat label="LATENCY" value={selected.latency_min != null ? `${Math.round(selected.latency_min)}M` : '--'} />
+        </View>
+
+        {stageList.length > 0 ? (
+          <View style={styles.graphWrap}>
+            <Hypnogram stages={stageList} width={chartW} startMs={selected.start_ms} endMs={selected.end_ms} />
           </View>
-        </View>
+        ) : (
+          <View style={styles.barTrack}>
+            {inBed > 0 ? (
+              STAGES.map((s) => {
+                const m = stageMin[s.stage];
+                if (m <= 0) return null;
+                return <View key={s.label} style={{ flex: m / inBed, backgroundColor: s.tint }} />;
+              })
+            ) : (
+              <View style={styles.barEmpty} />
+            )}
+          </View>
+        )}
 
-        {/* the stacked stage bar — each stage's width is its share of the night */}
-        <View style={styles.barTrack}>
-          {total > 0 ? (
-            STAGES.map((s) => {
-              const m = num(latest[s.key]);
-              if (m <= 0) return null;
-              return (
-                <View
-                  key={s.label}
-                  style={{ flex: m / total, backgroundColor: s.tint }}
-                />
-              );
-            })
-          ) : (
-            <View style={styles.barEmpty} />
-          )}
-        </View>
-
-        {/* the legend — minutes + share per stage */}
         <View style={styles.legend}>
           {STAGES.map((s) => {
-            const m = num(latest[s.key]);
-            const pct = total > 0 ? Math.round((m / total) * 100) : 0;
+            const m = stageMin[s.stage];
             return (
-              <View key={s.label} style={styles.legendRow}>
-                <View style={[styles.legendDot, { backgroundColor: s.tint }]} />
-                <Text style={styles.legendLabel}>{s.label}</Text>
-                <Text style={styles.legendPct}>{String(pct).padStart(3, ' ')}%</Text>
-                <Text style={styles.legendMin}>{minutesToHM(m)}</Text>
+              <View key={s.label} style={styles.legRow}>
+                <View style={[styles.legDot, { backgroundColor: s.tint }]} />
+                <Text style={styles.legLabel}>{s.label}</Text>
+                <View style={styles.legBarWrap}>
+                  <View
+                    style={[
+                      styles.legBar,
+                      { width: `${inBed > 0 ? (m / inBed) * 100 : 0}%`, backgroundColor: s.tint },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.legMin}>{minutesToHM(m)}</Text>
+                <Text style={styles.legPct}>{s.isSleep ? `${pct(m)}%` : ''}</Text>
               </View>
             );
           })}
         </View>
       </Panel>
 
-      {/* prior nights as compact terminal rows */}
-      {prior.length > 0 ? (
-        <Panel title="PRIOR CYCLES">
-          {prior.map((s, i) => (
-            <View
-              key={s.id ?? `${s.start_ms}`}
-              style={[styles.priorRow, i === 0 && styles.priorRowFirst]}
-            >
-              <Text style={styles.priorDate}>{fmtDate(s.date)}</Text>
-              <Text style={styles.priorTotal}>{minutesToHM(s.total_min)}</Text>
-              <Text style={styles.priorEff}>
-                {s.efficiency != null ? `${Math.round(s.efficiency)}% EFF` : '-- EFF'}
-              </Text>
-            </View>
-          ))}
-        </Panel>
-      ) : null}
+      <Panel title="THAT DAY">
+        {day.isLoading ? (
+          <Text style={styles.dim}>READING…</Text>
+        ) : (
+          <View style={styles.metricGrid}>
+            <Metric label="READINESS" value={readiness != null ? String(Math.round(readiness)) : '--'} color={scoreColor(readiness)} />
+            <Metric label="RESTING HR" value={n0(summ?.resting_hr)} unit="BPM" />
+            <Metric label="HRV" value={n0(summ?.hrv_rmssd)} unit="MS" />
+            <Metric label="SKIN TEMP" value={tempF != null ? tempF.toFixed(1) : '--'} unit="°F" />
+            <Metric label="SpO2" value={n0(summ?.spo2_avg)} unit="%" />
+            <Metric label="RESP" value={n0(summ?.resp_rate)} unit="BR/M" />
+          </View>
+        )}
+      </Panel>
     </ScrollView>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Metric({ label, value, unit, color }: { label: string; value: string; unit?: string; color?: string }) {
+  return (
+    <View style={styles.metric}>
+      <Text style={[styles.metricValue, color ? { color } : null]}>
+        {value}
+        {unit ? <Text style={styles.metricUnit}>{` ${unit}`}</Text> : null}
+      </Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -225,31 +286,45 @@ const styles = StyleSheet.create({
   },
   dim: { color: colors.textDim, fontSize: font.small, textAlign: 'center', letterSpacing: 1 },
   errTitle: { color: colors.text, fontFamily: fonts.display, fontSize: font.title },
+  cmd: {
+    borderWidth: 1,
+    borderColor: colors.text,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  cmdText: { color: colors.text, fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 1 },
+
+  chips: { gap: spacing.sm, paddingTop: spacing.sm },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    minWidth: 58,
+  },
+  chipActive: { borderColor: colors.text, backgroundColor: colors.surfaceAlt },
+  chipDay: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1 },
+  chipDate: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.small, letterSpacing: 1 },
+  chipTextActive: { color: colors.text },
 
   nightRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   nightWindow: { color: colors.textDim, fontSize: font.small, letterSpacing: 1, flex: 1 },
   nightDate: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1 },
 
-  big: {
-    color: colors.sleep,
-    fontFamily: fonts.display,
-    fontSize: font.big,
-    lineHeight: font.big + 4,
-    marginTop: spacing.md,
-  },
+  big: { color: colors.sleep, fontFamily: fonts.display, fontSize: font.big, lineHeight: font.big + 4, marginTop: spacing.md },
   bigLabel: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 2 },
 
-  statRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
-  },
+  statRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.lg, marginBottom: spacing.md },
   stat: { flex: 1, alignItems: 'center' },
   statValue: { color: colors.text, fontFamily: fonts.display, fontSize: font.title },
   statLabel: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 2, marginTop: spacing.xs },
   statDivider: { width: 1, alignSelf: 'stretch', backgroundColor: colors.border },
 
+  graphWrap: { marginTop: spacing.sm },
   barTrack: {
     flexDirection: 'row',
     height: 18,
@@ -263,31 +338,17 @@ const styles = StyleSheet.create({
   barEmpty: { flex: 1, backgroundColor: colors.surfaceAlt },
 
   legend: { marginTop: spacing.md, gap: 6 },
-  legendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  legendDot: { width: 10, height: 10 },
-  legendLabel: { color: colors.textDim, fontSize: font.small, letterSpacing: 1, flex: 1 },
-  legendPct: { color: colors.textDim, fontSize: font.small, width: 44, textAlign: 'right' },
-  legendMin: { color: colors.text, fontSize: font.small, width: 72, textAlign: 'right', letterSpacing: 1 },
+  legRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  legDot: { width: 10, height: 10 },
+  legLabel: { color: colors.textDim, fontSize: font.small, letterSpacing: 1, width: 56 },
+  legBarWrap: { flex: 1, height: 8, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  legBar: { height: '100%' },
+  legMin: { color: colors.text, fontSize: font.small, width: 64, textAlign: 'right', letterSpacing: 1 },
+  legPct: { color: colors.textDim, fontSize: font.tiny, width: 38, textAlign: 'right' },
 
-  priorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  priorRowFirst: { borderTopWidth: 0, paddingTop: 0 },
-  priorDate: { color: colors.textDim, fontSize: font.small, letterSpacing: 1, flex: 1 },
-  priorTotal: { color: colors.text, fontSize: font.small, letterSpacing: 1, width: 80, textAlign: 'right' },
-  priorEff: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1, width: 80, textAlign: 'right' },
-
-  cmd: {
-    borderWidth: 1,
-    borderColor: colors.text,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    marginTop: spacing.md,
-  },
-  cmdText: { color: colors.text, fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 1 },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  metric: { width: '33.33%', paddingVertical: spacing.sm },
+  metricValue: { color: colors.text, fontFamily: fonts.display, fontSize: 28, lineHeight: 30 },
+  metricUnit: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny },
+  metricLabel: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: 2 },
 });

@@ -15,6 +15,9 @@ export interface DailySummary {
   sleep_min: number | null;
   sleep_efficiency: number | null;
   sleep_latency_min: number | null;
+  // the API parses the stored stage_breakdown_json column and exposes it as
+  // `stage_breakdown` (object). the *_json alias is kept only for safety.
+  stage_breakdown?: StageBreakdown | string | null;
   stage_breakdown_json?: StageBreakdown | string | null;
   steps: number | null;
   met_high_min: number | null;
@@ -101,6 +104,8 @@ export interface SleepSession {
   rem_min: number | null;
   light_min: number | null;
   awake_min: number | null;
+  // API exposes the parsed stages_json column as `stages` (the hypnogram timeline)
+  stages?: SleepStage[] | string | null;
   stages_json?: SleepStage[] | string | null;
 }
 

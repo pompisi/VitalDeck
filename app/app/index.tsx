@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import LiveBadge from '../components/LiveBadge';
 import StatusFigure from '../components/StatusFigure';
 import Ticker from '../components/Ticker';
@@ -99,6 +100,7 @@ function FactorRow({ label, comp }: { label: string; comp: ReadinessComponent | 
 export default function StatusScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const router = useRouter();
 
   const today = useQuery({ queryKey: ['summary', 'today'], queryFn: getToday });
   const sync = useMutation({ mutationFn: postSync, onSuccess: () => qc.invalidateQueries() });
@@ -171,7 +173,7 @@ export default function StatusScreen() {
   }
 
   const { summary, metric, data_as_of } = today.data;
-  const stages = parseStages(summary?.stage_breakdown_json);
+  const stages = parseStages(summary?.stage_breakdown ?? summary?.stage_breakdown_json);
   const comps = metric?.components;
   const score = metric?.readiness_custom ?? null;
   const tint = scoreColor(score);
@@ -251,22 +253,25 @@ export default function StatusScreen() {
         </Panel>
       ) : null}
 
-      <Panel title="LAST REST CYCLE">
-        <View style={styles.restRow}>
-          <Text style={styles.restBig}>{minutesToHM(summary?.sleep_min)}</Text>
-          <Text style={styles.restEff}>
-            {summary?.sleep_efficiency != null
-              ? `${Math.round(summary.sleep_efficiency)}% EFF`
-              : '-- EFF'}
-          </Text>
-        </View>
-        <View style={styles.restStages}>
-          <Text style={styles.restStage}>DEEP {Math.round(stages.deep_min ?? 0)}</Text>
-          <Text style={styles.restStage}>REM {Math.round(stages.rem_min ?? 0)}</Text>
-          <Text style={styles.restStage}>LIGHT {Math.round(stages.light_min ?? 0)}</Text>
-          <Text style={styles.restStage}>AWAKE {Math.round(stages.awake_min ?? 0)}</Text>
-        </View>
-      </Panel>
+      <Pressable onPress={() => router.push('/sleep')}>
+        <Panel title="LAST REST CYCLE">
+          <View style={styles.restRow}>
+            <Text style={styles.restBig}>{minutesToHM(summary?.sleep_min)}</Text>
+            <Text style={styles.restEff}>
+              {summary?.sleep_efficiency != null
+                ? `${Math.round(summary.sleep_efficiency)}% EFF`
+                : '-- EFF'}
+            </Text>
+          </View>
+          <View style={styles.restStages}>
+            <Text style={styles.restStage}>DEEP {Math.round(stages.deep_min ?? 0)}</Text>
+            <Text style={styles.restStage}>REM {Math.round(stages.rem_min ?? 0)}</Text>
+            <Text style={styles.restStage}>LIGHT {Math.round(stages.light_min ?? 0)}</Text>
+            <Text style={styles.restStage}>AWAKE {Math.round(stages.awake_min ?? 0)}</Text>
+          </View>
+          <Text style={styles.restHint}>TAP FOR SLEEP DETAIL ›</Text>
+        </Panel>
+      </Pressable>
 
       {SyncButton}
       {sync.isError ? <Text style={styles.err}>SYNC FAILED</Text> : null}
@@ -341,6 +346,7 @@ const styles = StyleSheet.create({
   restEff: { color: colors.textDim, fontSize: font.small, letterSpacing: 1 },
   restStages: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
   restStage: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1 },
+  restHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
 
   cmd: {
     borderWidth: 1,
