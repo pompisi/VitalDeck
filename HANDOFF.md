@@ -17,6 +17,38 @@ metric the Oura cloud exposes; the app polls it every 60s. HRV / SpO2 / temp / s
 are nightly-only from the cloud — true real-time for those needs the BLE decoder
 (parked, see VALIDATION TODO).
 
+## Last session — 2026-06-29 (where we left off)
+Big push, all shipped to `main` + OTA'd (channel `preview`, runtime `0.1.0`):
+- Sleep stages: hypnogram fallback + staged-night picker (deployed + verified live).
+- SET tab: editable/persisted backend URL (TEST/SAVE) + character picker + boot-sound toggle.
+- Boot/power-on screen: INITIALIZE-gated, two-phase typing WITH sound; leads with the
+  Pompisi Studio command-prompt logo; status ticker on STATUS.
+- Characters: OPERATIVE + WIZARD (background-removed, baked phosphor-green); picker in SET.
+- Temps in °F everywhere; STATUS header = live device clock (AM/PM).
+- Live-ish current HR: `GET /live` polled every 60s + LiveBadge (verified ~73bpm live).
+- Privacy: Pi URL pulled out of the public repo (gitignored `app/.env` → `app.config.js`
+  `extra.apiUrl`; infra in `INFRA.local.md`). `npx tsc --noEmit` now exits 0.
+
+### ⚠️ Known gotcha hit today
+`extra.apiUrl` (app.config.js) did NOT reach the installed app over `eas update` — same
+failure as `EXPO_PUBLIC_*`. The app fell back to '' → "NO LINK / invalid URL:
+/summary/today". Workaround: the URL was entered in the SET tab (persisted, sticks). The
+real value lives in `INFRA.local.md` / `app/.env`.
+
+### Next up (pick any when you're back)
+1. **Make the default URL ride OTA** so a fresh install auto-connects without typing it:
+   bake `VITALDECK_API_URL` into the JS bundle (the bundle DOES propagate over OTA, unlike
+   config `extra`), read from the gitignored `app/.env` at build time — still nothing in the repo.
+2. **(optional) Scrub git history** — current files are clean, but old commits still contain
+   the Pi IP. A history rewrite (force-push) would fully remove it; low urgency (Tailscale-private).
+3. **Pompisi Studio asset pack** — standalone SVG/PNG logo for READMEs/icons/social (parked).
+4. **Live green⇄amber theme toggle** — deferred; needs the dynamic-theming refactor (palettes
+   ready in `theme.ts`, type now widened).
+5. **BLE live decoder** — full real-time HRV/SpO2/temp; the parked VALIDATION centerpiece.
+
+Session-end pointers: latest OTA = update group `fee62cca` (live HR), commit `90f6598`.
+`main` is 1 commit ahead of that OTA — `7da502c` (tsc cleanup, cosmetic, no OTA needed).
+
 ## Where everything lives
 - Local repo: `C:\Users\jango\OneDrive\Documents\App\vitaldeck` (git, branch `main`).
 - GitHub (public): https://github.com/pompisi/VitalDeck
