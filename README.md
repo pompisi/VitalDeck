@@ -222,4 +222,28 @@ Point the app at your backend with `EXPO_PUBLIC_API_URL`
   export only works while a membership is active. Cross-check decoded HR/HRV/temp
   against them *while you can* — both vanish when the trial lapses.
 
-This is a personal-use, single-ring tool. It is not affiliated with Oura.
+## Credits & licensing
+
+VitalDeck's own code is released under the [MIT License](LICENSE).
+
+The Bluetooth protocol decoding is **not** mine — it's the work of the community
+[`open_ring`](https://github.com/LogosIsLife/open_ring) project (GPLv3). VitalDeck
+invokes it as a **subprocess** (`python -m driver.cli replay`) and consumes its
+JSONL output; it does not import or link `open_ring`'s code, so the two stay at
+arm's length. `open_ring` isn't vendored here — it's cloned into
+`backend/vendor/open_ring` at setup time. All credit for the reverse-engineered
+Oura Ring 4 BLE protocol goes to its authors.
+
+## Development notes
+
+This project was built with AI-assisted development (Claude Code). I drove the
+architecture and engineering decisions, the research behind the locked decisions
+above, and the hardware reverse-engineering and validation — and I own and
+maintain the result. The design rationale and a defend-it-yourself walkthrough
+live in [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md). Using AI tooling this way is
+a deliberate part of how I work, not a substitute for understanding the system.
+
+---
+
+This is a personal-use, single-ring tool. It is not affiliated with or endorsed
+by Ōura.
