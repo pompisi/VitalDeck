@@ -14,13 +14,13 @@ import type {
   TrendMetric,
   TrendsResponse,
 } from './types';
+import { getApiBaseUrl } from './settings';
 
-// base url: env override if set, else the Pi's Tailscale url baked in as the
-// DEFAULT — so the standalone build always reaches the Pi no matter how it was
-// bundled (EXPO_PUBLIC_* doesn't reliably propagate into eas update). a future
-// in-app settings field can make this runtime-editable.
-export const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://100.113.92.26:8000';
+// base url is resolved at call time from the runtime settings cache (in-app value
+// > EXPO_PUBLIC_API_URL > the Pi's Tailscale url baked in as the default). that
+// way the standalone build always reaches the Pi no matter how it was bundled
+// (EXPO_PUBLIC_* doesn't reliably propagate into eas update), and the in-app
+// settings field (TODO 4) can repoint it without a rebuild.
 
 // shared fetch wrapper — does the json parse, http-status check, and turns any
 // thrown network error into a typed result
@@ -28,7 +28,7 @@ async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<ApiResult<T>> {
-  const url = `${BASE_URL}${path}`;
+  const url = `${getApiBaseUrl()}${path}`;
   try {
     const res = await fetch(url, {
       headers: { 'Content-Type': 'application/json' },

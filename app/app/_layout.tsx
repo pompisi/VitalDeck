@@ -7,10 +7,12 @@ import { useFonts, VT323_400Regular } from '@expo-google-fonts/vt323';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tabs } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import BootSequence from '../components/BootSequence';
 import CRTOverlay from '../components/CRTOverlay';
+import { loadSettings } from '../lib/settings';
 import { colors, fonts } from '../theme';
 
 // one client for the session. retry once — the Pi is on Tailscale and a single
@@ -37,12 +39,41 @@ const tabIcon =
   ({ color, size }: { color: string; size: number }) =>
     <Ionicons name={name} size={size ?? 22} color={color} />;
 
+// the boot overlay gates the whole UI, so any render-time throw inside it (audio,
+// image decode, native hiccup) must NOT brick launch — fall straight through to the
+// app instead. onError dismisses the overlay; getDerivedStateFromError renders null.
+class BootBoundary extends React.Component<
+  { onError: () => void; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.props.onError();
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({ VT323_400Regular, ShareTechMono_400Regular });
 
-  // hold on the dead-tube background until the fonts are in — but never brick the
-  // app if a font fails to load
-  if (!loaded && !error) {
+  // hydrate runtime settings (the saved API url) once, before any screen queries
+  // fire, so the fetch wrapper resolves the right base url on its first request.
+  const [settingsReady, setSettingsReady] = useState(false);
+  useEffect(() => {
+    loadSettings().finally(() => setSettingsReady(true));
+  }, []);
+
+  // the power-on sequence shows over the app on every cold start until it dismisses
+  const [booting, setBooting] = useState(true);
+
+  // hold on the dead-tube background until fonts + settings are in — but never
+  // brick the app if a font fails to load
+  if ((!loaded && !error) || !settingsReady) {
     return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 
@@ -88,7 +119,17 @@ export default function RootLayout() {
               name="tags"
               options={{ title: 'LOG', tabBarIcon: tabIcon('pricetags') }}
             />
+            <Tabs.Screen
+              name="settings"
+              options={{ title: 'SET', tabBarIcon: tabIcon('settings') }}
+            />
           </Tabs>
+          {/* scanlines sit above the boot overlay too, so the CRT look is unbroken */}
+          {booting ? (
+            <BootBoundary onError={() => setBooting(false)}>
+              <BootSequence onDone={() => setBooting(false)} />
+            </BootBoundary>
+          ) : null}
           <CRTOverlay />
         </View>
       </QueryClientProvider>

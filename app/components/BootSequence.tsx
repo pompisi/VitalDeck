@@ -1,0 +1,204 @@
+// the power-on sequence shown over everything on cold start: the operative figure
+// fades/scales in, a terminal boot log types out line-by-line with a haptic +
+// audio blip each, a progress bar fills, then the whole thing fades into the app.
+// it is BULLETPROOF about dismissing — driven by timers with an absolute safety
+// timeout and tap-to-skip — so it can never strand the UI behind the overlay.
+// character.png is a phosphor-green PNG, baked luminance-preserving from the
+// white-on-transparent original kept at assets/character_src.png (so internal
+// linework survives — a flat tintColor would flatten it to a green blob). to retheme
+// (e.g. amber for the future toggle), re-bake from character_src.png.
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import * as Haptics from 'expo-haptics';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { getApiBaseUrl } from '../lib/settings';
+import { colors, font, fonts, glow, spacing } from '../theme';
+
+const AnimatedImage = Animated.createAnimatedComponent(Image);
+
+const LINE_MS = 230; // per boot-log line
+const START_MS = 350; // delay before the first line
+const LINGER_MS = 600; // hold on "SYSTEM READY" before fading out
+const SAFETY_MS = 6000; // absolute backstop — never strand the UI
+
+export default function BootSequence({ onDone }: { onDone: () => void }) {
+  // boot log; the LINK line shows whatever the Pi url is currently set to
+  const lines = useMemo(() => {
+    let host = '---';
+    try {
+      host = getApiBaseUrl().replace(/^https?:\/\//, '');
+    } catch {
+      // keep the placeholder host
+    }
+    return [
+      'VITALDECK OS  v0.1.0',
+      'PHOSPHOR BIOS // (C) D.POMPA',
+      'INITIALIZING SENSOR ARRAY......... OK',
+      'MOUNTING DATA STORE............... OK',
+      `LINK > ${host}`,
+      'CALIBRATING BIOMETRICS............ OK',
+      'SYSTEM READY',
+    ];
+  }, []);
+
+  const [visible, setVisible] = useState(0);
+  const doneRef = useRef(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const charOpacity = useSharedValue(0);
+  const charScale = useSharedValue(0.82);
+  const progress = useSharedValue(0);
+  const root = useSharedValue(1);
+
+  // a short blip; if audio fails to load/play it must not affect the sequence
+  const player = useAudioPlayer(require('../assets/blip.wav'));
+
+  const cue = useCallback(() => {
+    try {
+      player.seekTo(0);
+      player.play();
+    } catch {
+      // audio is cosmetic — ignore any failure
+    }
+    try {
+      Haptics.selectionAsync();
+    } catch {
+      // haptics unavailable on some devices — ignore
+    }
+  }, [player]);
+
+  const finish = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    timers.current.forEach(clearTimeout);
+    root.value = withTiming(0, { duration: 320, easing: Easing.in(Easing.quad) });
+    setTimeout(onDone, 340);
+  }, [onDone, root]);
+
+  useEffect(() => {
+    try {
+      // let the blip sound even with the ringer switch silenced
+      setAudioModeAsync({ playsInSilentMode: true });
+    } catch {
+      // non-fatal
+    }
+
+    charOpacity.value = withTiming(1, { duration: 550, easing: Easing.out(Easing.quad) });
+    charScale.value = withTiming(1, { duration: 650, easing: Easing.out(Easing.back(1.4)) });
+    progress.value = withTiming(1, {
+      duration: lines.length * LINE_MS + 200,
+      easing: Easing.linear,
+    });
+
+    lines.forEach((_, i) => {
+      timers.current.push(
+        setTimeout(() => {
+          setVisible(i + 1);
+          cue();
+        }, START_MS + i * LINE_MS),
+      );
+    });
+
+    timers.current.push(
+      setTimeout(finish, START_MS + lines.length * LINE_MS + LINGER_MS),
+    );
+    timers.current.push(setTimeout(finish, SAFETY_MS));
+
+    return () => timers.current.forEach(clearTimeout);
+    // run-once on mount; lines/cue/finish are stable for the boot's lifetime
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const rootStyle = useAnimatedStyle(() => ({ opacity: root.value }));
+  const charStyle = useAnimatedStyle(() => ({
+    opacity: charOpacity.value,
+    transform: [{ scale: charScale.value }],
+  }));
+  const progStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.root, rootStyle]}>
+      {/* full-screen tap target sits under the (pointer-transparent) content */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={finish} />
+
+      <View style={styles.stack} pointerEvents="none">
+        <AnimatedImage
+          source={require('../assets/character.png')}
+          resizeMode="contain"
+          style={[styles.char, charStyle]}
+        />
+        <Text style={styles.title}>VITALDECK</Text>
+
+        <View style={styles.console}>
+          {lines.slice(0, visible).map((ln, i) => (
+            <Text
+              key={i}
+              style={[styles.line, i === lines.length - 1 && styles.lineReady]}
+              numberOfLines={1}
+            >
+              {`> ${ln}`}
+            </Text>
+          ))}
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressFill, progStyle]} />
+          </View>
+        </View>
+      </View>
+
+      <Text style={styles.skip} pointerEvents="none">
+        TAP TO SKIP
+      </Text>
+    </Animated.View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+    elevation: 100,
+  },
+  stack: { alignItems: 'center', width: '100%', paddingHorizontal: spacing.xl },
+  char: { width: 240, height: 240 },
+  title: {
+    color: colors.text,
+    fontFamily: fonts.display,
+    fontSize: 56,
+    letterSpacing: 4,
+    marginTop: spacing.sm,
+    ...glow(colors.text, 16),
+  },
+  console: { width: '82%', marginTop: spacing.xl, minHeight: 150 },
+  line: {
+    color: colors.textDim,
+    fontFamily: fonts.mono,
+    fontSize: font.tiny,
+    letterSpacing: 1,
+    marginVertical: 1,
+  },
+  lineReady: { color: colors.text, ...glow(colors.text, 8) },
+  progressTrack: {
+    height: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: spacing.md,
+    padding: 1,
+  },
+  progressFill: { height: '100%', backgroundColor: colors.text },
+  skip: {
+    position: 'absolute',
+    bottom: 44,
+    color: colors.textFaint,
+    fontFamily: fonts.mono,
+    fontSize: font.tiny,
+    letterSpacing: 2,
+  },
+});

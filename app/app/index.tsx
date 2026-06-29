@@ -8,7 +8,9 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusFigure from '../components/StatusFigure';
+import Ticker from '../components/Ticker';
 import { getToday, postSync } from '../lib/api';
+import { getApiBaseUrl } from '../lib/settings';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
 import { colors, font, fonts, glow, radius, scoreColor, spacing } from '../theme';
 
@@ -142,6 +144,18 @@ export default function StatusScreen() {
   const score = metric?.readiness_custom ?? null;
   const tint = scoreColor(score);
 
+  const n0 = (v: number | null | undefined): string =>
+    v == null || Number.isNaN(v) ? '--' : String(Math.round(v));
+  const tickerItems = [
+    `READINESS ${score != null ? Math.round(score) : '--'}`,
+    `HRV ${n0(summary?.hrv_rmssd)} MS`,
+    `RHR ${n0(summary?.resting_hr)} BPM`,
+    `SKIN ${summary?.temp_mean_c != null ? summary.temp_mean_c.toFixed(1) : '--'} C`,
+    `SpO2 ${n0(summary?.spo2_avg)} %`,
+    `LINK ${getApiBaseUrl().replace(/^https?:\/\//, '')}`,
+    `LAST SYNC ${fmtAsOf(data_as_of)}`,
+  ];
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -165,6 +179,8 @@ export default function StatusScreen() {
         temp={summary?.temp_mean_c}
         spo2={summary?.spo2_avg}
       />
+
+      <Ticker items={tickerItems} />
 
       {/* HP-style condition bar */}
       <View style={styles.condRow}>

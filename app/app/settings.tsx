@@ -1,0 +1,202 @@
+// SETTINGS: point the app at a different backend without a rebuild (TODO 4). edit
+// the Pi's URL, TEST it (pings /health and times it), SAVE it (persisted + triggers
+// a refetch), or RESET to the baked-in default. also a small read-only system panel.
+import { useQueryClient } from '@tanstack/react-query';
+import Constants from 'expo-constants';
+import React, { useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Panel, ScreenHeader } from '../components/Pip';
+import { getHealth } from '../lib/api';
+import {
+  DEFAULT_API_URL,
+  getApiBaseUrl,
+  resetApiBaseUrl,
+  setApiBaseUrl,
+} from '../lib/settings';
+import { colors, font, fonts, spacing } from '../theme';
+
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
+
+  const [url, setUrl] = useState(getApiBaseUrl());
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testOk, setTestOk] = useState(false);
+
+  // apply the typed value to the live client (also persists it)
+  const apply = async (next: string) => {
+    const applied = await setApiBaseUrl(next);
+    setUrl(applied);
+    qc.invalidateQueries();
+    return applied;
+  };
+
+  const onSave = async () => {
+    await apply(url);
+    setSaved(true);
+    setTestResult(null);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const onTest = async () => {
+    setTesting(true);
+    setSaved(false);
+    setTestResult(null);
+    await apply(url);
+    const t0 = Date.now();
+    const r = await getHealth();
+    const ms = Date.now() - t0;
+    setTesting(false);
+    if (r.ok) {
+      setTestOk(true);
+      setTestResult(`LINK OK // ${ms}MS // DB ${r.data.db ? 'UP' : 'DOWN'}`);
+    } else {
+      setTestOk(false);
+      setTestResult(`LINK FAILED // ${r.error}`);
+    }
+  };
+
+  const onReset = async () => {
+    const def = await resetApiBaseUrl();
+    setUrl(def);
+    qc.invalidateQueries();
+    setTestResult(null);
+    setSaved(false);
+  };
+
+  const version = Constants.expoConfig?.version ?? '0.1.0';
+
+  return (
+    <ScrollView
+      style={styles.scroll}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.xxl },
+      ]}
+    >
+      <ScreenHeader title="SET" sub="TERMINAL CONFIG" />
+
+      <Panel title="PIP LINK">
+        <Text style={styles.label}>BACKEND URL</Text>
+        <View style={styles.field}>
+          <Text style={styles.prompt}>{'>'}</Text>
+          <TextInput
+            style={styles.input}
+            value={url}
+            onChangeText={setUrl}
+            placeholder={DEFAULT_API_URL}
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            returnKeyType="done"
+            onSubmitEditing={onSave}
+          />
+        </View>
+
+        <View style={styles.btnRow}>
+          <Pressable style={[styles.cmd, styles.cmdFlex]} disabled={testing} onPress={onTest}>
+            <Text style={styles.cmdText}>{testing ? '> TESTING…' : '> TEST LINK'}</Text>
+          </Pressable>
+          <Pressable style={[styles.cmd, styles.cmdFlex]} onPress={onSave}>
+            <Text style={styles.cmdText}>{'> SAVE'}</Text>
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.resetBtn} onPress={onReset}>
+          <Text style={styles.resetText}>RESET TO DEFAULT</Text>
+        </Pressable>
+
+        {saved ? <Text style={styles.ok}>SAVED — REFETCHING</Text> : null}
+        {testResult ? (
+          <Text style={[styles.result, testOk ? styles.ok : styles.bad]}>{testResult}</Text>
+        ) : null}
+      </Panel>
+
+      <Panel title="SYSTEM">
+        <Row label="APP VERSION" value={version} />
+        <Row label="DEFAULT URL" value={DEFAULT_API_URL.replace(/^https?:\/\//, '')} />
+        <Row label="THEME" value="GREEN PHOSPHOR" />
+        <Text style={styles.note}>AMBER THEME TOGGLE — COMING SOON</Text>
+      </Panel>
+    </ScrollView>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg },
+
+  label: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 2, marginBottom: spacing.xs },
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  prompt: { color: colors.text, fontFamily: fonts.mono, fontSize: font.body },
+  input: {
+    flex: 1,
+    color: colors.text,
+    fontFamily: fonts.mono,
+    fontSize: font.body,
+    paddingVertical: spacing.md,
+    letterSpacing: 1,
+  },
+
+  btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  cmd: {
+    borderWidth: 1,
+    borderColor: colors.text,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+  },
+  cmdFlex: { flex: 1 },
+  cmdText: { color: colors.text, fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 1 },
+
+  resetBtn: { alignItems: 'center', paddingVertical: spacing.md, marginTop: spacing.xs },
+  resetText: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 2 },
+
+  result: { fontSize: font.small, textAlign: 'center', marginTop: spacing.sm, letterSpacing: 1 },
+  ok: { color: colors.good, fontSize: font.small, textAlign: 'center', marginTop: spacing.sm, letterSpacing: 1 },
+  bad: { color: colors.bad },
+
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.md,
+  },
+  rowLabel: { color: colors.textDim, fontSize: font.small, letterSpacing: 1 },
+  rowValue: { color: colors.text, fontFamily: fonts.mono, fontSize: font.small, letterSpacing: 1, flexShrink: 1 },
+  note: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm },
+});

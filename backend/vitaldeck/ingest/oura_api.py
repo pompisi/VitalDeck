@@ -72,6 +72,93 @@ def _mins(sec: Any) -> Optional[float]:
     return round(n / 60, 1) if n is not None else None
 
 
+# oura's 5-minute hypnogram (`sleep_phase_5_min`): one char per 5-min window,
+# 1=deep 2=light 3=rem 4=awake. it's the staging fallback for nights whose
+# explicit *_duration fields come back null (the cause of "stages read 0").
+_HYPNO_STAGE = {"1": "deep", "2": "light", "3": "rem", "4": "awake"}
+_HYPNO_WINDOW_S = 300  # each char = 5 minutes
+
+
+def _hypnogram_minutes(phase: Any) -> Optional[dict[str, float]]:
+    """deriving per-stage minutes from a sleep_phase_5_min string. returns None if
+    the field is absent/empty/unrecognized so callers fall back cleanly."""
+    if not isinstance(phase, str) or not phase:
+        return None
+    counts = {"deep": 0.0, "light": 0.0, "rem": 0.0, "awake": 0.0}
+    seen = False
+    for ch in phase:
+        stage = _HYPNO_STAGE.get(ch)
+        if stage is None:
+            continue
+        counts[stage] += 5.0
+        seen = True
+    if not seen:
+        return None
+    return {
+        "deep_min": counts["deep"],
+        "rem_min": counts["rem"],
+        "light_min": counts["light"],
+        "awake_min": counts["awake"],
+    }
+
+
+def _hypnogram_stages(phase: Any) -> Optional[list[dict[str, Any]]]:
+    """run-length expanding sleep_phase_5_min into our stages_json shape
+    ([{stage, duration_s}, ...]). None when the hypnogram is absent — keeps the
+    api path's stages_json null rather than fabricating an empty list."""
+    if not isinstance(phase, str) or not phase:
+        return None
+    runs: list[dict[str, Any]] = []
+    for ch in phase:
+        stage = _HYPNO_STAGE.get(ch)
+        if stage is None:
+            continue
+        if runs and runs[-1]["stage"] == stage:
+            runs[-1]["duration_s"] += _HYPNO_WINDOW_S
+        else:
+            runs.append({"stage": stage, "duration_s": _HYPNO_WINDOW_S})
+    return runs or None
+
+
+def _stage_minutes(s: dict[str, Any]) -> dict[str, Optional[float]]:
+    """deep/rem/light/awake minutes for one oura sleep record. prefers the explicit
+    *_duration fields; when all the staged ones are missing (some nights/records
+    only carry the hypnogram), derives them from sleep_phase_5_min instead."""
+    deep = _mins(s.get("deep_sleep_duration"))
+    rem = _mins(s.get("rem_sleep_duration"))
+    light = _mins(s.get("light_sleep_duration"))
+    awake = _mins(s.get("awake_time"))
+    if deep is None and rem is None and light is None:
+        hyp = _hypnogram_minutes(s.get("sleep_phase_5_min"))
+        if hyp is not None:
+            deep = hyp["deep_min"]
+            rem = hyp["rem_min"]
+            light = hyp["light_min"]
+            awake = awake if awake is not None else hyp["awake_min"]
+    return {"deep_min": deep, "rem_min": rem, "light_min": light, "awake_min": awake}
+
+
+def _has_stages(s: dict[str, Any]) -> bool:
+    """does this record carry usable staging — explicit durations or a hypnogram?"""
+    if any(
+        s.get(k) is not None
+        for k in ("deep_sleep_duration", "rem_sleep_duration", "light_sleep_duration")
+    ):
+        return True
+    phase = s.get("sleep_phase_5_min")
+    return isinstance(phase, str) and bool(phase)
+
+
+def _night_rank(s: dict[str, Any]) -> tuple[int, int, float]:
+    """ranking key for picking the main night per day: prefer a record that
+    actually has staging, then a long_sleep, then the longest. picking a staged
+    record over a longer un-staged one is what keeps DEEP/REM/LIGHT off zero."""
+    has = 1 if _has_stages(s) else 0
+    is_long = 1 if s.get("type") == "long_sleep" else 0
+    dur = _num(s.get("total_sleep_duration")) or 0.0
+    return (has, is_long, dur)
+
+
 def fetch(token: str, days: int = 30) -> dict[str, list[dict[str, Any]]]:
     """pulling the endpoints we map, over the trailing <days> window. sleep is
     required; the rest are best-effort (device/plan dependent)."""
@@ -91,17 +178,18 @@ def fetch(token: str, days: int = 30) -> dict[str, list[dict[str, Any]]]:
 def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     """pure mapping: oura docs -> our daily_summary + sleep_session dicts. kept
     side-effect-free so it's unit-testable without the network."""
-    # pick the main night per day (prefer long_sleep, else the longest record)
-    by_day: dict[str, dict[str, Any]] = {}
+    # pick the main night per day: collect every record for the day, then choose
+    # by _night_rank (staged > long_sleep > longest). picking by rank instead of
+    # "longest or any long_sleep" stops an un-staged record shadowing a staged one.
+    by_day_lists: dict[str, list[dict[str, Any]]] = {}
     for s in payload.get("sleep", []):
         day = s.get("day")
         if not day:
             continue
-        dur = _num(s.get("total_sleep_duration")) or 0
-        prev = by_day.get(day)
-        prev_dur = (_num(prev.get("total_sleep_duration")) or 0) if prev else -1
-        if prev is None or s.get("type") == "long_sleep" or dur > prev_dur:
-            by_day[day] = s
+        by_day_lists.setdefault(day, []).append(s)
+    by_day: dict[str, dict[str, Any]] = {
+        day: max(recs, key=_night_rank) for day, recs in by_day_lists.items()
+    }
 
     sessions: list[dict[str, Any]] = []
     for day, s in by_day.items():
@@ -109,6 +197,7 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
         end_ms = _ms(s.get("bedtime_end"))
         if start_ms is None or end_ms is None:
             continue
+        sm = _stage_minutes(s)
         sessions.append({
             "date": day,
             "start_ms": start_ms,
@@ -116,11 +205,12 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
             "total_min": _mins(s.get("total_sleep_duration")),
             "efficiency": _num(s.get("efficiency")),
             "latency_min": _mins(s.get("latency")),
-            "deep_min": _mins(s.get("deep_sleep_duration")),
-            "rem_min": _mins(s.get("rem_sleep_duration")),
-            "light_min": _mins(s.get("light_sleep_duration")),
-            "awake_min": _mins(s.get("awake_time")),
-            "stages_json": None,
+            "deep_min": sm["deep_min"],
+            "rem_min": sm["rem_min"],
+            "light_min": sm["light_min"],
+            "awake_min": sm["awake_min"],
+            # populated from the 5-min hypnogram when oura provides it; else null
+            "stages_json": _hypnogram_stages(s.get("sleep_phase_5_min")),
         })
 
     readiness = {r.get("day"): r for r in payload.get("daily_readiness", []) if r.get("day")}
@@ -142,6 +232,7 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
             spo2_avg = _num(block.get("average"))
 
         steps = _num(ac.get("steps"))
+        sm = _stage_minutes(s)
 
         daily.append({
             "date": day,
@@ -157,10 +248,10 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
             "sleep_efficiency": _num(s.get("efficiency")),
             "sleep_latency_min": _mins(s.get("latency")),
             "stage_breakdown_json": json.dumps({
-                "deep_min": _mins(s.get("deep_sleep_duration")),
-                "rem_min": _mins(s.get("rem_sleep_duration")),
-                "light_min": _mins(s.get("light_sleep_duration")),
-                "awake_min": _mins(s.get("awake_time")),
+                "deep_min": sm["deep_min"],
+                "rem_min": sm["rem_min"],
+                "light_min": sm["light_min"],
+                "awake_min": sm["awake_min"],
             }),
             "steps": int(steps) if steps is not None else None,
             "met_high_min": _mins(ac.get("high_activity_time")),
