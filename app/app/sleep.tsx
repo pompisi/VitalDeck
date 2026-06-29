@@ -3,7 +3,7 @@
 // a per-stage legend), then prior sessions as compact terminal rows. data +
 // states preserved from before; this is the restyle.
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
@@ -48,9 +48,12 @@ const fmtNight = (s: SleepSession): string => {
   }
 };
 
+// the session date is a plain YYYY-MM-DD (Oura's wake-up day). parse it as LOCAL —
+// `new Date('2026-06-28')` would parse as UTC midnight and then render a day early
+// in any timezone west of UTC (e.g. US), which made the latest night read as 06-27.
 const fmtDate = (raw: string): string => {
   try {
-    return format(new Date(raw), 'yyyy.MM.dd').toUpperCase();
+    return format(parseISO(raw), 'yyyy.MM.dd').toUpperCase();
   } catch {
     return raw.toUpperCase();
   }

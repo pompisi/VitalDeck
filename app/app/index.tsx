@@ -274,7 +274,9 @@ export default function StatusScreen() {
         <Text style={styles.ok}>
           {sync.data.mode === 'synthetic'
             ? `SIM DAY GENERATED (+${sync.data.ingested})`
-            : `SYNCED (+${sync.data.ingested} NEW / ${sync.data.deduped} DUP)`}
+            : sync.data.mode === 'oura'
+              ? `SYNCED — ${sync.data.ingested} DAYS REFRESHED FROM OURA`
+              : `SYNCED (+${sync.data.ingested} NEW / ${sync.data.deduped} DUP)`}
         </Text>
       ) : null}
     </ScrollView>
