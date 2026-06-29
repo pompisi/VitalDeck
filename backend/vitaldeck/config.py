@@ -28,6 +28,19 @@ ADB_BIN = os.environ.get("VITALDECK_ADB_BIN", "adb")
 # scratch dir for bugreport zips + extracted btsnoop captures
 CAPTURE_DIR = Path(os.environ.get("VITALDECK_CAPTURE_DIR", str(BACKEND_DIR / "captures")))
 
+# oura cloud api — the no-debugging, no-snoop-log path to real data while a
+# membership/trial is active. token is a secret: set it on the pi via an env
+# file (never commit it). when OURA_TOKEN is set, /sync uses this path first.
+OURA_TOKEN = os.environ.get("VITALDECK_OURA_TOKEN", "")
+OURA_API_BASE = os.environ.get(
+    "VITALDECK_OURA_BASE", "https://api.ouraring.com/v2/usercollection"
+)
+OURA_TIMEOUT_S = float(os.environ.get("VITALDECK_OURA_TIMEOUT", "20"))
+# oura reports skin temperature as a DEVIATION from your own baseline; we store
+# an absolute around this nominal so the readiness deviation-vs-baseline math
+# behaves the same as the snoop-log path.
+NOMINAL_TEMP_BASELINE_C = 36.5
+
 # the schema file the store layer applies on connect
 SCHEMA_PATH = PACKAGE_DIR / "db" / "schema.sql"
 

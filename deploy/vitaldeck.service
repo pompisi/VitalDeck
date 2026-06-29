@@ -14,7 +14,9 @@ Type=simple
 User=pompisi
 WorkingDirectory=/home/pompisi/vitaldeck/backend
 Environment=PYTHONPATH=/home/pompisi/vitaldeck/backend
-# for real ring data, also set: Environment=VITALDECK_ADB_TARGET=<host:port>
+# secrets (the oura api token, etc.) live in this gitignored, chmod-600 file so
+# they never land in the repo or chat. the leading "-" makes it optional.
+EnvironmentFile=-/home/pompisi/vitaldeck-secrets.env
 ExecStart=/home/pompisi/vitaldeck/backend/.venv/bin/uvicorn vitaldeck.api.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=3

@@ -87,6 +87,22 @@ def _latest_event(conn: sqlite3.Connection) -> Optional[int]:
         return None
 
 
+def _data_as_of(conn: sqlite3.Connection) -> Optional[int]:
+    """'data as of' — newest raw event, or (the oura path, which has no
+    raw_records) the newest sleep session end, so the STATUS header reads right
+    no matter which ingest source ran."""
+    ev = _latest_event(conn)
+    if ev is not None:
+        return ev
+    try:
+        sessions = store.get_sleep_sessions(conn, 14)
+        ends = [int(s["end_ms"]) for s in sessions if s.get("end_ms") is not None]
+        return max(ends) if ends else None
+    except Exception as exc:
+        print(f"[api] data_as_of sleep fallback failed: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # health
 # ---------------------------------------------------------------------------
@@ -98,7 +114,7 @@ def health() -> dict[str, Any]:
     try:
         with _conn() as conn:
             db_ok = True
-            data_as_of = _latest_event(conn)
+            data_as_of = _data_as_of(conn)
     except Exception as exc:
         print(f"[api] /health db open failed: {exc}")
         db_ok = False
@@ -122,7 +138,7 @@ def _summary_payload(conn: sqlite3.Connection, summary: dict[str, Any]) -> dict[
         "date": date,
         "summary": summary,
         "metric": metric,
-        "data_as_of": _latest_event(conn),
+        "data_as_of": _data_as_of(conn),
     }
 
 
@@ -325,9 +341,11 @@ def run_sync() -> dict[str, Any]:
     stored event, ingest, rebuild summaries, recompute recent metrics.
     live mode: pull the snoop log + decode it, then the same downstream rebuild.
     """
-    if not config.ADB_TARGET:
-        return _sync_synthetic()
-    return _sync_live()
+    if config.OURA_TOKEN:
+        return _sync_oura()
+    if config.ADB_TARGET:
+        return _sync_live()
+    return _sync_synthetic()
 
 
 def _sync_synthetic() -> dict[str, Any]:
@@ -438,24 +456,76 @@ def _sync_live() -> dict[str, Any]:
     }
 
 
+def _sync_oura() -> dict[str, Any]:
+    """pull real data from the oura cloud api (token set) — the no-debugging,
+    no-snoop-log path. upserts summaries + sleep directly, then scores."""
+    ingested = 0
+    data_as_of: Optional[int] = None
+    try:
+        from vitaldeck.ingest import oura_api
+
+        with _conn() as conn:
+            sync_run_id = None
+            try:
+                sync_run_id = store.start_sync_run(conn, "oura-api")
+            except Exception as exc:
+                print(f"[api] start_sync_run failed: {exc}")
+
+            result = oura_api.ingest_oura(conn, config.OURA_TOKEN, days=30)
+            ingested = int(result.get("ingested", 0))
+
+            if sync_run_id is not None:
+                try:
+                    store.finish_sync_run(conn, sync_run_id, "ok", ingested, 0)
+                except Exception as exc:
+                    print(f"[api] finish_sync_run failed: {exc}")
+
+            # the oura path upserts daily_summaries itself, so we score WITHOUT a
+            # rebuild_all (which would wipe them — raw_records is empty here)
+            _score_only(conn)
+            data_as_of = _data_as_of(conn)
+    except Exception as exc:
+        print(f"[api] oura sync failed: {exc}")
+        return {
+            "ok": False,
+            "ingested": ingested,
+            "deduped": 0,
+            "data_as_of": data_as_of,
+            "mode": "oura",
+            "error": str(exc),
+        }
+    return {
+        "ok": True,
+        "ingested": ingested,
+        "deduped": 0,
+        "data_as_of": data_as_of,
+        "mode": "oura",
+    }
+
+
 def _recompute(conn: sqlite3.Connection) -> None:
-    """after ingest: rebuild daily_summaries + sleep, then recompute readiness
-    for the recent days off the freshly-built baselines."""
+    """raw-based paths (synthetic/live): rebuild daily_summaries + sleep from
+    raw_records, then score off the fresh baselines."""
     try:
         summarize.rebuild_all(conn)
     except Exception as exc:
         print(f"[api] rebuild_all failed: {exc}")
         return
+    _score_only(conn)
 
+
+def _score_only(conn: sqlite3.Connection) -> None:
+    """recompute readiness for the recent days off whatever daily_summaries are
+    currently stored — WITHOUT rebuilding them (the oura path upserts its own).
+
+    compute_baselines over the slice up to and including each day keeps the
+    baseline causal (no peeking at future days)."""
     try:
         summaries = store.get_daily_summaries(conn, 60)
     except Exception as exc:
         print(f"[api] get_daily_summaries (recompute) failed: {exc}")
         return
 
-    # recomputing readiness for each recent day against the baselines as-of that
-    # day. compute_baselines over the slice up to and including the day keeps the
-    # baseline causal (no peeking at future days).
     for i, today in enumerate(summaries):
         try:
             window = summaries[: i + 1]
