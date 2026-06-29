@@ -108,6 +108,41 @@ export default function TodayScreen() {
     );
   }
 
+  // a fresh/empty db returns 404 from /summary/today — that's not a failure,
+  // it's the empty state, so we let the user kick off the very first sync
+  // instead of dead-ending them on the "couldn't reach the server" screen
+  const isEmpty =
+    today.isError &&
+    today.error instanceof Error &&
+    /HTTP 404/.test(today.error.message);
+
+  if (isEmpty) {
+    return (
+      <View style={styles.fill}>
+        <Text style={styles.errTitle}>No data yet</Text>
+        <Text style={styles.dim}>Tap Sync to pull your first day.</Text>
+        <Pressable
+          style={[styles.syncBtn, sync.isPending && styles.syncBtnBusy]}
+          disabled={sync.isPending}
+          onPress={() => sync.mutate()}
+        >
+          {sync.isPending ? (
+            <ActivityIndicator color={colors.bg} />
+          ) : (
+            <Text style={styles.syncText}>Sync now</Text>
+          )}
+        </Pressable>
+        {sync.isError ? (
+          <Text style={styles.syncErr}>
+            Sync failed:{' '}
+            {sync.error instanceof Error ? sync.error.message : 'unknown'}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
+
+  // reserve the hard-error screen for genuine non-404 failures
   if (today.isError || !today.data) {
     return (
       <View style={styles.fill}>

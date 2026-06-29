@@ -40,7 +40,10 @@ def compute_baselines(summaries: list[dict], windows=config.BASELINE_WINDOWS) ->
         # sorting defensively so "most recent <window>" is honored regardless of
         # how the caller handed them to us
         try:
-            summaries = sorted(summaries, key=lambda s: s.get("date", ""))
+            # a dateless/None row can't be claimed as recent, so it sorts to the
+            # FRONT (oldest) and never displaces a genuinely-dated day from the
+            # trailing window. ('date is not None' -> False sorts before True.)
+            summaries = sorted(summaries, key=lambda s: (s.get("date") is not None, s.get("date") or ""))
         except Exception:  # noqa: BLE001 — never let a weird row break baselining
             pass
 

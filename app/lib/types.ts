@@ -46,7 +46,7 @@ export interface ReadinessComponents {
 // the metrics row; components/baselines parsed back to objects by the API
 export interface Metric {
   date?: string;
-  readiness_custom: number;
+  readiness_custom: number | null;
   components: ReadinessComponents;
   baselines?: Record<string, unknown>;
 }
@@ -110,7 +110,7 @@ export interface SleepResponse {
 
 export interface MetricsPoint {
   date: string;
-  readiness_custom: number;
+  readiness_custom: number | null;
   components: ReadinessComponents;
 }
 

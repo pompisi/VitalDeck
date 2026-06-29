@@ -23,10 +23,19 @@ def _print_table(rows: list[tuple[str, object, object, object, object]]) -> None
     header = ("date", "readiness", "hrv", "rest_hr", "temp_c")
     widths = (12, 10, 8, 8, 9)
 
+    def fmt_cell(cell: object) -> str:
+        # rounding floats to fixed precision so values fit their column width and
+        # the table stays aligned; Nones render as a dash.
+        if cell is None:
+            return "-"
+        if isinstance(cell, float):
+            return f"{cell:.1f}"
+        return str(cell)
+
     def fmt_row(cells: tuple) -> str:
         out = []
         for cell, w in zip(cells, widths):
-            out.append(str(cell).ljust(w))
+            out.append(fmt_cell(cell).ljust(w))
         return "  ".join(out)
 
     print(fmt_row(header))

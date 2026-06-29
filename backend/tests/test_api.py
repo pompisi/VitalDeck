@@ -133,3 +133,30 @@ def test_tags_roundtrip(client: TestClient) -> None:
     deleted = client.delete(f"/tags/{tag_id}")
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["deleted"] is True
+
+
+def test_create_tag_null_id_is_500(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # store.add_tag swallows sqlite errors and returns a null-id dict; the api
+    # must surface that as a 500 instead of a 200 with id:null. forcing that
+    # failure shape via monkeypatch on the store the endpoint actually imports.
+    from vitaldeck.api import main as main_mod
+
+    def _null_add_tag(conn, ts_ms, label, note=None):
+        return {"id": None, "ts_ms": ts_ms, "label": label, "note": note, "created_at": None}
+
+    monkeypatch.setattr(main_mod.store, "add_tag", _null_add_tag)
+    resp = client.post("/tags", json={"ts_ms": 1_700_000_000_000, "label": "broken"})
+    assert resp.status_code == 500, resp.text
+
+
+def test_tags_negative_days_clamped(client: TestClient) -> None:
+    # a negative days used to slip through to the store and silently return [].
+    # with clamping (max(0, ...)) it lands on 0 — a window anchored at the newest
+    # tag — so a freshly-added tag still comes back instead of vanishing.
+    created = client.post("/tags", json={"ts_ms": 1_700_000_000_000, "label": "clamp probe"})
+    assert created.status_code == 200, created.text
+
+    neg = client.get("/tags", params={"days": -5})
+    assert neg.status_code == 200, neg.text
+    # the negative value must NOT be treated as "an empty window"
+    assert len(neg.json()["tags"]) > 0

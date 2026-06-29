@@ -147,12 +147,12 @@ function TrendChart({
     );
   }
 
-  // labeling roughly every 5th day so the x-axis doesn't crowd
-  const step = Math.max(1, Math.floor(data.length / 6));
-  const chartData = data.map((p, i) => ({
-    value: p.value ?? 0,
-    // hideDataPoint where there's no real value so gaps read as gaps
-    hideDataPoint: p.value == null,
+  // building the line from only the present points — synthesizing 0 for gap days
+  // would collapse the line to the axis (and spike negative under the y-offset),
+  // so we drop the missing days entirely and keep the real points' date labels
+  const step = Math.max(1, Math.floor(present.length / 6));
+  const chartData = present.map((p, i) => ({
+    value: p.value,
     label: i % step === 0 ? safeLabel(p.date) : undefined,
     dataPointColor: tint,
   }));

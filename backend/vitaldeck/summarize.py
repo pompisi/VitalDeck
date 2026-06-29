@@ -79,43 +79,46 @@ def _data(rec: dict) -> dict:
     return d if isinstance(d, dict) else {}
 
 
-def _summarize_day(date: str, recs: list[dict]) -> dict:
-    """rolling one day's records into a daily_summary dict keyed exactly to the
-    daily_summaries columns."""
-    asleep_hr: list[float] = []
-    all_hr: list[float] = []
+def _summarize_day(date: str, recs: list[dict]) -> Optional[dict]:
+    """rolling one day's DAYTIME records into a daily_summary dict keyed exactly to
+    the daily_summaries columns.
+
+    nightly asleep-derived metrics (resting_hr, hrv_rmssd, spo2_avg, resp_rate,
+    temp_mean_c) are NOT computed here — a night that straddles local midnight would
+    otherwise get split across two day buckets. those land later in
+    summarize_records, attributed to the sleep session's (end) date. here we only
+    keep what's genuinely per-local-day: daytime hr, steps, met minutes.
+
+    returns None when a local day has no real daytime/activity data of its own —
+    i.e. it only holds nightly samples that have leaked across midnight and belong
+    to a session attributed to another date. that prevents a phantom pre-midnight
+    row.
+    """
     day_hr: list[float] = []
-    rmssd: list[float] = []
-    temp: list[float] = []
-    spo2: list[float] = []
-    resp: list[float] = []
     steps = 0
     met_high_s = 0.0
+    # has this day got any record that genuinely belongs to it (a daytime/activity
+    # sample)? if all we ever see is leaked nightly stuff, we return None below.
+    has_daytime = False
 
     for rec in recs:
         rtype = rec.get("type")
         d = _data(rec)
         try:
             if rtype == "heart_rate":
-                bpm = float(d["bpm"])
-                all_hr.append(bpm)
-                if d.get("asleep"):
-                    asleep_hr.append(bpm)
-                else:
+                # only the awake (daytime) heart rate is a per-day signal; the
+                # asleep samples belong to a session and get rolled up there.
+                if not d.get("asleep"):
+                    bpm = float(d["bpm"])
                     day_hr.append(bpm)
-            elif rtype == "hrv":
-                rmssd.append(float(d["rmssd_ms"]))
-            elif rtype == "skin_temp":
-                temp.append(float(d["temp_c"]))
-            elif rtype == "spo2":
-                spo2.append(float(d["spo2_pct"]))
-            elif rtype == "resp":
-                resp.append(float(d["rpm"]))
+                    has_daytime = True
             elif rtype == "accel":
                 # crude pedometer: each above-threshold accel sample ~= a stride
+                has_daytime = True
                 if float(d["acm"]) >= _ACCEL_STEP_THRESHOLD:
                     steps += 2
             elif rtype == "activity_met":
+                has_daytime = True
                 met = float(d["met"])
                 if met >= _MET_HIGH_THRESHOLD:
                     # met bins arrive ~1/min in the synth; counting a minute each
@@ -124,21 +127,23 @@ def _summarize_day(date: str, recs: list[dict]) -> dict:
             # one malformed payload shouldn't sink the whole day's summary
             continue
 
-    # resting_hr = ~5th percentile of asleep heart rate; falling back to all-hr if
-    # the night had no asleep samples so we still report something sane.
-    rhr_source = asleep_hr if asleep_hr else all_hr
-    resting_hr = _percentile(rhr_source, 5.0)
+    if not has_daytime:
+        # nothing here but leaked nightly samples — no row of its own
+        return None
 
     return {
         "date": date,
-        "resting_hr": resting_hr,
-        "hr_min": min(all_hr) if all_hr else None,
-        "hr_max": max(all_hr) if all_hr else None,
+        # nightly asleep-derived metrics start empty; folded in per sleep session
+        "resting_hr": None,
+        # hr_min/hr_max start from the daytime span and get widened by the night's
+        # asleep samples when a session is attributed to this date.
+        "hr_min": min(day_hr) if day_hr else None,
+        "hr_max": max(day_hr) if day_hr else None,
         "hr_avg_day": _mean(day_hr),
-        "hrv_rmssd": _mean(rmssd),
-        "spo2_avg": _mean(spo2),
-        "resp_rate": _mean(resp),
-        "temp_mean_c": _mean(temp),
+        "hrv_rmssd": None,
+        "spo2_avg": None,
+        "resp_rate": None,
+        "temp_mean_c": None,
         # sleep fields get filled in once sessions are attributed to this day
         "sleep_min": None,
         "sleep_efficiency": None,
@@ -146,6 +151,55 @@ def _summarize_day(date: str, recs: list[dict]) -> dict:
         "stage_breakdown_json": None,
         "steps": int(steps),
         "met_high_min": met_high_s / 60.0,
+    }
+
+
+def _nightly_metrics(records: list[dict], start_ms: int, end_ms: int) -> dict:
+    """computing the asleep-derived nightly metrics from the records that fall
+    inside one stitched sleep window [start_ms, end_ms].
+
+    pulling asleep heart_rate (-> resting_hr + the night's hr extremes), hrv, spo2,
+    resp and skin_temp from the whole night regardless of which local day each
+    sample lands in, so a cross-midnight night reads as a single coherent night.
+    """
+    asleep_hr: list[float] = []
+    rmssd: list[float] = []
+    temp: list[float] = []
+    spo2: list[float] = []
+    resp: list[float] = []
+
+    for rec in records:
+        rtype = rec.get("type")
+        try:
+            t = int(rec["t_event_ms"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if t < start_ms or t > end_ms:
+            continue
+        d = _data(rec)
+        try:
+            if rtype == "heart_rate":
+                if d.get("asleep"):
+                    asleep_hr.append(float(d["bpm"]))
+            elif rtype == "hrv":
+                rmssd.append(float(d["rmssd_ms"]))
+            elif rtype == "skin_temp":
+                temp.append(float(d["temp_c"]))
+            elif rtype == "spo2":
+                spo2.append(float(d["spo2_pct"]))
+            elif rtype == "resp":
+                resp.append(float(d["rpm"]))
+        except (KeyError, TypeError, ValueError):
+            # one malformed payload shouldn't sink the night's rollup
+            continue
+
+    return {
+        "resting_hr": _percentile(asleep_hr, 5.0),
+        "asleep_hr": asleep_hr,
+        "hrv_rmssd": _mean(rmssd),
+        "spo2_avg": _mean(spo2),
+        "resp_rate": _mean(resp),
+        "temp_mean_c": _mean(temp),
     }
 
 
@@ -281,7 +335,12 @@ def summarize_records(records: list[dict]) -> dict:
         return {"daily": [], "sleep": []}
 
     by_day = _bucket_by_day(records)
-    daily = [_summarize_day(date, recs) for date, recs in sorted(by_day.items())]
+    # _summarize_day returns None for a day that only holds leaked cross-midnight
+    # nightly samples — filtering those out kills the phantom pre-midnight row.
+    daily = [
+        s for s in (_summarize_day(date, recs) for date, recs in sorted(by_day.items()))
+        if s is not None
+    ]
 
     sleep = _build_sleep_sessions(records)
 
@@ -296,7 +355,7 @@ def summarize_records(records: list[dict]) -> dict:
     for date, sess_list in sessions_by_date.items():
         summary = by_date_summary.get(date)
         if summary is None:
-            # a sleep session whose day had no other records — synthesize a row so
+            # a sleep session whose day had no daytime records — synthesize a row so
             # the sleep data still surfaces. keeping the non-sleep fields None.
             summary = {
                 "date": date,
@@ -309,6 +368,46 @@ def summarize_records(records: list[dict]) -> dict:
             }
             daily.append(summary)
             by_date_summary[date] = summary
+
+        # rolling up the asleep-derived nightly metrics from the WHOLE night (every
+        # sample inside each session window), attributed here to the session's end
+        # date — so a cross-midnight night reads as one night instead of splitting.
+        night_hr: list[float] = []
+        night_resting: list[float] = []
+        night_hrv: list[float] = []
+        night_spo2: list[float] = []
+        night_resp: list[float] = []
+        night_temp: list[float] = []
+        for s in sess_list:
+            nm = _nightly_metrics(records, s["start_ms"], s["end_ms"])
+            night_hr.extend(nm["asleep_hr"])
+            if nm["resting_hr"] is not None:
+                night_resting.append(nm["resting_hr"])
+            if nm["hrv_rmssd"] is not None:
+                night_hrv.append(nm["hrv_rmssd"])
+            if nm["spo2_avg"] is not None:
+                night_spo2.append(nm["spo2_avg"])
+            if nm["resp_rate"] is not None:
+                night_resp.append(nm["resp_rate"])
+            if nm["temp_mean_c"] is not None:
+                night_temp.append(nm["temp_mean_c"])
+
+        # resting_hr = ~5th percentile across the night's pooled asleep heart rate
+        # (recomputed on the pooled samples rather than averaging per-session
+        # percentiles, which would be wrong for multiple sessions).
+        summary["resting_hr"] = _percentile(night_hr, 5.0)
+        summary["hrv_rmssd"] = _mean(night_hrv)
+        summary["spo2_avg"] = _mean(night_spo2)
+        summary["resp_rate"] = _mean(night_resp)
+        summary["temp_mean_c"] = _mean(night_temp)
+
+        # widening the day's hr extremes with the night's asleep lows/highs so
+        # hr_min/hr_max span both the daytime and the night attributed here.
+        if night_hr:
+            lo = min(night_hr)
+            hi = max(night_hr)
+            summary["hr_min"] = lo if summary["hr_min"] is None else min(summary["hr_min"], lo)
+            summary["hr_max"] = hi if summary["hr_max"] is None else max(summary["hr_max"], hi)
 
         total_sleep = sum(s["total_min"] for s in sess_list)
         deep = sum(s["deep_min"] for s in sess_list)

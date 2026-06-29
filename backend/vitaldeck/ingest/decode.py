@@ -9,6 +9,7 @@ of truth and our code as a thin, defensive adapter.
 from __future__ import annotations
 
 import subprocess
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,36 @@ def decode_capture(
         # couldn't even launch — bad cwd, missing python, etc.
         raise DecodeError(f"could not start replay {cmd!r} in {open_ring_dir}: {exc}") from exc
 
+    # draining stderr on a background thread so a chatty replay (>~64KB on stderr)
+    # can't deadlock us while we're busy reading stdout — both pipes get read
+    # concurrently. the buffer is consulted only after the stdout loop finishes.
+    stderr_chunks: list[str] = []
+
+    def _drain_stderr() -> None:
+        # reading the whole stderr pipe into memory; swallowing read errors so a
+        # broken pipe never crashes the helper thread
+        try:
+            if proc.stderr is not None:
+                stderr_chunks.append(proc.stderr.read())
+        except (OSError, ValueError):
+            pass
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
+    def _collected_stderr() -> str:
+        # joining the thread (best-effort) then stitching whatever stderr we drained
+        try:
+            stderr_thread.join(timeout=30)
+        except RuntimeError:
+            pass
+        try:
+            if proc.stderr is not None:
+                proc.stderr.close()
+        except OSError:
+            pass
+        return "".join(stderr_chunks)
+
     try:
         # streaming each decoded line out as the subprocess produces it
         if proc.stdout is not None:
@@ -64,38 +95,39 @@ def decode_capture(
             pass
         raise DecodeError(f"failed while streaming replay output: {exc}") from exc
     finally:
-        # always drain/close so the child can exit and we can read its stderr
+        # this finally runs on the happy path AND on early-abandon: a consumer that
+        # breaks out of the generator triggers GeneratorExit (a BaseException, so it
+        # slips past the 'except Exception' above) and lands right here. closing
+        # stdout, draining stderr, and killing/reaping the child keeps us from
+        # orphaning the process or swallowing a nonzero exit on early exit.
         try:
             if proc.stdout is not None:
                 proc.stdout.close()
         except OSError:
             pass
 
-    # waiting for the child and checking its exit code after stdout is exhausted
-    try:
-        stderr = proc.stderr.read() if proc.stderr is not None else ""
-    except OSError:
-        stderr = ""
-    finally:
-        try:
-            if proc.stderr is not None:
-                proc.stderr.close()
-        except OSError:
-            pass
+        stderr = _collected_stderr()
 
-    try:
-        returncode = proc.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        try:
-            proc.kill()
-        except OSError:
-            pass
-        raise DecodeError(f"replay {cmd!r} did not exit in time")
+        # if the child is still alive (early-abandon, or it never exited), kill it
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
-    if returncode != 0:
-        raise DecodeError(
-            f"replay {cmd!r} exited {returncode}: {stderr.strip() or '<no stderr>'}"
-        )
+        try:
+            returncode = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            raise DecodeError(f"replay {cmd!r} did not exit in time")
+
+        if returncode != 0:
+            raise DecodeError(
+                f"replay {cmd!r} exited {returncode}: {stderr.strip() or '<no stderr>'}"
+            )
 
 
 def decode_text(jsonl_text: str) -> Iterator[dict[str, Any]]:

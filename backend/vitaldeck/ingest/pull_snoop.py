@@ -7,7 +7,7 @@ full btsnoop_hci.log is dropped in as a file, or only a compressed "btsnooz" blo
 is embedded in the main bugreport text. we handle both, then hand the raw btsnoop
 bytes to the replay decoder.
 
-reference: AOSP btsnooz format = base64{ 8-byte header + zlib-deflate{ records } }.
+reference: AOSP btsnooz format = base64{ 1 version byte + raw(v2)/zlib(v1) deflate{ records } }.
 """
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ _BTSNOOZ_MARKERS = (
     "btsnooz",
 )
 
-# the AOSP btsnooz header is 8 bytes (a 4-byte magic + version/etc.) sitting in
-# front of the zlib-deflated record stream.
-_BTSNOOZ_HEADER_LEN = 8
+# the AOSP btsnooz header is a single VERSION byte sitting in front of the
+# deflated record stream: version 2 = raw deflate, version 1 = zlib stream.
+_BTSNOOZ_HEADER_LEN = 1
 
 
 def pull_bugreport(
@@ -134,7 +134,10 @@ def extract_btsnoop(
         # path 1: a real btsnoop file is sitting in the zip
         snoop_members = [n for n in names if "btsnoop" in n.lower()]
         if snoop_members:
-            member = snoop_members[0]
+            # ranking candidates so we never grab a stale rotation — the live
+            # 'btsnoop_hci.log' wins over 'btsnoop_hci.log.last' / numbered backups
+            # regardless of their order in the zip
+            member = min(snoop_members, key=_snoop_rank)
             try:
                 raw = zf.read(member)
             except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
@@ -174,15 +177,20 @@ def decode_btsnooz(bugreport_text: str) -> bytes:
     """decoding the embedded btsnooz blob into raw btsnoop bytes.
 
     locating the base64 block after the btsnooz / BTSNOOP_LOG_SUMMARY marker,
-    base64-decoding it, then zlib-inflating the body that follows the 8-byte
-    AOSP header. returns the reconstructed btsnoop byte stream.
+    base64-decoding it, then inflating the body that follows the single AOSP
+    version byte: version 2 = raw deflate, version 1 = a zlib stream. returns the
+    reconstructed btsnoop byte stream.
     """
     # finding where the blob starts: the first marker present in the text
     start = -1
     for marker in _BTSNOOZ_MARKERS:
         idx = bugreport_text.find(marker)
         if idx != -1:
-            start = idx + len(marker)
+            # advancing past the rest of THIS line so any trailing same-line text
+            # after the marker (e.g. "BTSNOOP_LOG_SUMMARY (4096 bytes):") doesn't
+            # get glued onto the front of the base64 blob
+            nl = bugreport_text.find("\n", idx)
+            start = nl + 1 if nl != -1 else len(bugreport_text)
             break
     if start == -1:
         raise PullError("no btsnooz marker found in bugreport text")
@@ -221,15 +229,35 @@ def decode_btsnooz(bugreport_text: str) -> bytes:
 
     if len(decoded) < _BTSNOOZ_HEADER_LEN:
         raise PullError(
-            f"btsnooz payload too short ({len(decoded)} bytes) for an 8-byte header"
+            f"btsnooz payload too short ({len(decoded)} bytes) for the 1-byte version header"
         )
 
-    # inflating the deflate stream that sits after the 8-byte header
+    # the AOSP btsnooz layout is: 1 version byte then the deflated record stream.
+    # version 2 is a RAW deflate stream (no zlib wrapper); version 1 is a full zlib
+    # stream. we branch on the version, but for robustness we try raw-deflate first
+    # and fall back to a zlib stream either way.
+    version = decoded[0]
     body = decoded[_BTSNOOZ_HEADER_LEN:]
-    try:
-        return zlib.decompress(body)
-    except zlib.error as exc:
-        raise PullError(f"btsnooz zlib inflate failed: {exc}") from exc
+
+    def _raw_inflate(buf: bytes) -> bytes:
+        # raw deflate has no zlib header, so we drive a decompressobj with a
+        # negative window size to skip the wrapper
+        return zlib.decompressobj(-zlib.MAX_WBITS).decompress(buf)
+
+    if version == 1:
+        order = (zlib.decompress, _raw_inflate)
+    else:
+        # version 2 (and anything else) defaults to raw deflate first
+        order = (_raw_inflate, zlib.decompress)
+
+    last_exc: zlib.error | None = None
+    for inflate in order:
+        try:
+            return inflate(body)
+        except zlib.error as exc:
+            last_exc = exc
+            continue
+    raise PullError(f"btsnooz inflate failed: {last_exc}") from last_exc
 
 
 def pull_and_extract(
@@ -240,6 +268,22 @@ def pull_and_extract(
     """convenience: pulling a fresh bugreport then extracting its btsnoop bytes."""
     zip_path = pull_bugreport(adb_target=adb_target, out_dir=out_dir, adb_bin=adb_bin)
     return extract_btsnoop(zip_path, out_dir=out_dir)
+
+
+def _snoop_rank(name: str) -> int:
+    """ranking a zip member so the freshest btsnoop log sorts first (min wins).
+
+    the exact, live 'btsnoop_hci.log' basename ranks 0; rotated logs (a '.last'
+    suffix or a trailing numeric rotation like 'btsnoop_hci.log.1') rank last;
+    everything else lands in the middle.
+    """
+    base = Path(name).name.lower()
+    if base == "btsnoop_hci.log":
+        return 0
+    # rotated/stale backups: '*.last' or a numeric rotation suffix ('*.log.2')
+    if base.endswith(".last") or re.search(r"\.\d+$", base):
+        return 2
+    return 1
 
 
 def _write_bytes(out_path: Path, raw: bytes) -> Path:

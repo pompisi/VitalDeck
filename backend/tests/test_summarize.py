@@ -31,9 +31,10 @@ def _rec(t_ms: int, rtype: str, data: dict, sess: int = 1, ctr: int = 0) -> dict
 def _build_day() -> list[dict]:
     recs: list[dict] = []
 
-    # a night of sleep 1:00-7:00 local. heart rate while asleep (lower) + hrv +
-    # temp + spo2 + resp sampled through the night.
-    for h in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
+    # a night of sleep ~1:00-3:45 local. heart rate while asleep (lower) + hrv +
+    # temp + spo2 + resp sampled through the night, all inside the stitched session
+    # window so the nightly-metric rollup picks them up.
+    for h in [1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
         recs.append(_rec(_ms(h), "heart_rate", {"bpm": 52 + int(h), "asleep": True}))
         recs.append(_rec(_ms(h), "hrv", {"rmssd_ms": 60.0 + h}))
         recs.append(_rec(_ms(h), "skin_temp", {"temp_c": 36.0 + h * 0.01}))
@@ -76,13 +77,13 @@ def test_daily_summary_fields():
     assert len(result["daily"]) == 1
     day = result["daily"][0]
 
-    # resting_hr should be near the low end of the asleep heart rates (53..58)
+    # resting_hr should be near the low end of the asleep heart rates (53..55)
     assert day["resting_hr"] is not None
     assert 53.0 <= day["resting_hr"] <= 55.0
 
-    # hrv is the mean of the nightly rmssd (61..66 -> 63.5)
+    # hrv is the mean of the nightly rmssd (61, 61.5, 62, 62.5, 63, 63.5 -> 62.25)
     assert day["hrv_rmssd"] is not None
-    assert abs(day["hrv_rmssd"] - 63.5) < 0.01
+    assert abs(day["hrv_rmssd"] - 62.25) < 0.01
 
     # temp mean ~36.03x
     assert day["temp_mean_c"] is not None
@@ -138,3 +139,70 @@ def test_sleep_session():
     # the session's date is the local date of its end_ms
     assert sess["date"] is not None
     assert sess["start_ms"] < sess["end_ms"]
+
+
+def _build_cross_midnight_night() -> list[dict]:
+    """a night that straddles local midnight: ~23:00 the night before -> ~07:00 the
+    test day. the pre-midnight tail must NOT spawn a phantom prior-day row, and the
+    whole night's asleep metrics must land on the (end) test day."""
+    recs: list[dict] = []
+
+    # asleep heart_rate/hrv/temp/spo2/resp sampled across the night, half before
+    # midnight (h<0 == the previous local day) and half after (h>=0 == test day).
+    for h in [-1.0, -0.5, 0.5, 1.5, 3.0, 5.0, 6.5]:
+        recs.append(_rec(_ms(h), "heart_rate", {"bpm": 56, "asleep": True}))
+        recs.append(_rec(_ms(h), "hrv", {"rmssd_ms": 70.0}))
+        recs.append(_rec(_ms(h), "skin_temp", {"temp_c": 36.2}))
+        recs.append(_rec(_ms(h), "spo2", {"spo2_pct": 96.0}))
+        recs.append(_rec(_ms(h), "resp", {"rpm": 13.0}))
+
+    # one daytime heart rate so the test day has a genuine row of its own
+    recs.append(_rec(_ms(14.0), "heart_rate", {"bpm": 88, "asleep": False}))
+
+    # the hypnogram running 23:00 -> 07:00 (h=-1.0 .. h=7.0), one contiguous run
+    stage_plan = [
+        ("awake", 600),    # 10 min latency
+        ("light", 7200),   # 2h
+        ("deep", 7200),    # 2h
+        ("rem", 5400),     # 1.5h
+        ("light", 7800),   # 2h10m -> ends near 07:00
+    ]
+    t = _ms(-1.0)
+    for stage, dur in stage_plan:
+        recs.append(_rec(t, "sleep_stage", {"stage": stage, "duration_s": dur}))
+        t += dur * 1000
+
+    return recs
+
+
+def test_cross_midnight_night_lands_on_end_date():
+    recs = _build_cross_midnight_night()
+    result = summarize.summarize_records(recs)
+
+    # exactly one sleep session, dated to its end (the test day), not the start day
+    assert len(result["sleep"]) == 1
+    sess = result["sleep"][0]
+    end_date = summarize._local_day(sess["end_ms"])
+    start_date = summarize._local_day(sess["start_ms"])
+    assert start_date != end_date  # the night genuinely straddles midnight
+    assert sess["date"] == end_date
+
+    # exactly one daily row — no phantom pre-midnight row from the leaked tail
+    assert len(result["daily"]) == 1
+    day = result["daily"][0]
+    assert day["date"] == end_date
+
+    # the WHOLE night's asleep metrics land on the end date, computed from all 7
+    # asleep samples (both sides of midnight), not just the post-midnight half
+    assert day["resting_hr"] == 56.0
+    assert day["hrv_rmssd"] == 70.0
+    assert day["spo2_avg"] == 96.0
+    assert day["resp_rate"] == 13.0
+    assert day["temp_mean_c"] is not None and abs(day["temp_mean_c"] - 36.2) < 0.01
+
+    # sleep_min lands on the same (end) date as the nightly metrics
+    assert day["sleep_min"] is not None and day["sleep_min"] > 0
+
+    # hr extremes span the asleep low (56) and the daytime high (88)
+    assert day["hr_min"] == 56.0
+    assert day["hr_max"] == 88.0

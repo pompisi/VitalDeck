@@ -28,6 +28,7 @@ from .models import (
     SleepResponse,
     SummaryResponse,
     SyncResponse,
+    Tag,
     TagCreate,
     TagsResponse,
     TrendsResponse,
@@ -266,6 +267,9 @@ def metrics_endpoint(days: int = 30) -> dict[str, Any]:
 @app.get("/tags", response_model=TagsResponse)
 def list_tags(days: Optional[int] = None) -> dict[str, Any]:
     """listing manual context tags (caffeine, gym, alcohol…)."""
+    # clamping days the same way the other windowed endpoints do — a negative
+    # value used to slip through and silently return [].
+    days = None if days is None else max(0, min(days, 365))
     with _conn() as conn:
         try:
             tags = store.list_tags(conn, days)
@@ -275,7 +279,7 @@ def list_tags(days: Optional[int] = None) -> dict[str, Any]:
     return {"tags": tags}
 
 
-@app.post("/tags")
+@app.post("/tags", response_model=Tag)
 def create_tag(body: TagCreate) -> dict[str, Any]:
     """recording a new tag and handing back the created row."""
     with _conn() as conn:
@@ -284,6 +288,10 @@ def create_tag(body: TagCreate) -> dict[str, Any]:
         except Exception as exc:
             print(f"[api] add_tag failed: {exc}")
             raise HTTPException(status_code=500, detail="failed to create tag") from exc
+    # store.add_tag swallows sqlite errors and hands back a null-id dict, so a
+    # failed insert would otherwise 200 with id:null — treating that as a 500.
+    if not row or row.get("id") is None:
+        raise HTTPException(status_code=500, detail="failed to create tag")
     return row
 
 

@@ -217,9 +217,15 @@ def _gen_daytime(
     day_end_ms: int,
     sess: int,
     out: list[dict[str, Any]],
+    force_battery: bool = False,
 ) -> None:
     """filling the waking hours: daytime heart_rate, accel activity bursts,
-    activity_met bins, and an occasional battery reading."""
+    activity_met bins, and an occasional battery reading.
+
+    `force_battery` makes the battery emission deterministic on at least one
+    generated day so short windows (days=1) still carry every canonical type
+    instead of relying on the rnd.random()<0.6 gate landing.
+    """
     # daytime heart_rate every ~5 min, higher than the asleep trough
     hr_base = rnd.uniform(64, 76)
     hr_ctr = 0
@@ -255,8 +261,15 @@ def _gen_daytime(
         met_ctr += 1
         tt += 15 * MS_PER_MIN
 
-    # an occasional battery reading — once or twice across the day
-    if rnd.random() < 0.6:
+    # an occasional battery reading — once or twice across the day. forcing it
+    # on at least one day (force_battery) so every canonical type is guaranteed
+    # present even in a single-day window. when forced we anchor it right at
+    # wake so it lands inside even a tiny surviving window (the most recent day
+    # can be trimmed hard by the end_ms filter), then add a small jitter.
+    if force_battery:
+        batt_t = day_wake_ms + rnd.randint(0, 5) * MS_PER_MIN
+        out.append(_env(batt_t, "battery", sess, 0, {"pct": rnd.randint(20, 100)}))
+    elif rnd.random() < 0.6:
         batt_t = day_wake_ms + rnd.randint(0, max(1, day_end_ms - day_wake_ms))
         out.append(_env(batt_t, "battery", sess, 0, {"pct": rnd.randint(20, 100)}))
 
@@ -311,17 +324,31 @@ def generate(days: int = 30, seed: int = 42, end_ms: int | None = None) -> list[
         is_bad = back in bad_days
         _, sleep_end = _gen_sleep_window(rnd, night_start, sess, is_bad, out)
 
-        # daytime runs from a bit after waking until late evening of this local
-        # day, but never past end_ms for the most recent day.
+        # daytime runs from a bit after waking until late evening (22:00 local)
+        # of this local day. we DON'T pre-clamp day_end to end_ms anymore — even
+        # the most recent day (back==0) gets its full circadian daytime block so
+        # the latest day isn't left with night-only data. anything that spills
+        # past end_ms is trimmed by the final filter below.
         day_wake = sleep_end + rnd.randint(10, 40) * MS_PER_MIN
         day_end = local_midnight + 22 * MS_PER_HOUR
-        if back == 0:
-            day_end = min(day_end, end_ms)
+        # on the most recent day end_ms can land mid-morning — sometimes even
+        # before the night finishes — which would strand the entire daytime block
+        # past end_ms and leave the latest day night-only. pulling the daytime
+        # window back so it sits inside [.., end_ms]: a couple of hours of
+        # "morning so far" ending at the cutoff. the final filter still trims the
+        # 22:00 tail; this just guarantees the daytime types actually survive.
+        if back == 0 and day_wake >= end_ms - 2 * MS_PER_HOUR:
+            day_wake = end_ms - 2 * MS_PER_HOUR
         if day_wake < day_end:
-            _gen_daytime(rnd, day_wake, day_end, sess, out)
+            # forcing a battery reading on the first generated day so a days=1
+            # window still contains every canonical type deterministically.
+            _gen_daytime(rnd, day_wake, day_end, sess, out, force_battery=(back == 0))
 
     # sorting chronologically so the JSONL reads like a real capture stream
     out.sort(key=lambda r: (r["t_event_ms"], r["type"]))
+    # trimming anything that leaked past the window end — nightly samples on the
+    # most recent day could otherwise sit beyond end_ms.
+    out = [r for r in out if r["t_event_ms"] <= end_ms]
     return out
 
 

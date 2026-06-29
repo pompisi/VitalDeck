@@ -148,11 +148,11 @@ def pull_bugreport(adb_target=config.ADB_TARGET, out_dir=config.CAPTURE_DIR, adb
 def extract_btsnoop(bugreport_zip: Path, out_dir=config.CAPTURE_DIR) -> Path
 #   globs the zip for any '*btsnoop*' file; if only the embedded btsnooz blob exists
 #   in the main bugreport-*.txt, decode it via decode_btsnooz().
-def decode_btsnooz(bugreport_text: str) -> bytes      # base64 + zlib-inflate -> btsnoop bytes
+def decode_btsnooz(bugreport_text: str) -> bytes      # base64 + (1 version byte + raw(v2)/zlib(v1) deflate)-inflate -> btsnoop bytes
 def pull_and_extract(...) -> Path                      # convenience: bugreport then extract
 ```
 All adb/zip/subprocess calls wrapped defensively; raise PullError with context.
-Do NOT require root anywhere. Reference: AOSP btsnooz format = base64{ header + deflate{ records } }.
+Do NOT require root anywhere. Reference: AOSP btsnooz format = base64{ 1 version byte + raw(v2)/zlib(v1) deflate{ records } }.
 
 ---
 

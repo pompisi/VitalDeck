@@ -100,17 +100,39 @@ def ingest_records(
 
     dedupe rides on the ux_raw_dedup unique index (t_event_ms, type, sess); a
     row that collides is silently ignored, so re-running ingest on overlapping
-    captures is safe. deduped = attempted - newly inserted, with a by_type
-    breakdown of what actually landed.
+    captures is safe. a record that's actually malformed (missing the NOT NULL
+    t_event_ms/type, or carrying non-serializable data) used to vanish into the
+    deduped bucket because INSERT OR IGNORE yields rowcount 0 with no error — so
+    we validate up front and count those as 'errored', loudly logging each drop.
+    deduped is then the honest leftover: attempted - ingested - errored, with a
+    by_type breakdown of what actually landed.
+
+    note: this adds an 'errored' key on top of the CONTRACTS §2 shape
+    ({ingested, deduped, by_type}); the documented keys are unchanged so callers
+    keep working, and the new key surfaces what would otherwise be silent drops.
     """
     ingested = 0
     attempted = 0
+    errored = 0
     by_type: dict[str, int] = {}
 
     for rec in records:
         attempted += 1
+        # validating the NOT NULL key fields first; a missing t_event_ms or a
+        # non-string type can never insert (INSERT OR IGNORE just swallows it to
+        # rowcount 0), so flagging it as errored keeps it out of the deduped count
+        t_event_ms = rec.get("t_event_ms")
+        rtype = rec.get("type")
+        if t_event_ms is None or not isinstance(rtype, str):
+            errored += 1
+            print(
+                f"ingest_records dropped a malformed record "
+                f"(t_event_ms={t_event_ms!r}, type={rtype!r})"
+            )
+            continue
         try:
-            # serializing the type-specific fields; missing/odd data -> {} json
+            # serializing the type-specific fields; missing/odd data -> {} json,
+            # but a non-json-serializable data dict raises TypeError -> errored
             data = rec.get("data")
             if not isinstance(data, dict):
                 data = {}
@@ -120,8 +142,8 @@ def ingest_records(
                 "(t_event_ms, type, sess, ctr, tag, data_json, sync_run_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    rec.get("t_event_ms"),
-                    rec.get("type"),
+                    t_event_ms,
+                    rtype,
                     rec.get("sess", NO_SESSION),
                     rec.get("ctr", -1),
                     _tag_to_text(rec.get("tag")),
@@ -132,12 +154,12 @@ def ingest_records(
             if cur.rowcount and cur.rowcount > 0:
                 # rowcount 1 means a fresh insert; 0 means the unique index ignored it
                 ingested += 1
-                rtype = rec.get("type")
-                if isinstance(rtype, str):
-                    by_type[rtype] = by_type.get(rtype, 0) + 1
+                by_type[rtype] = by_type.get(rtype, 0) + 1
         except (sqlite3.Error, TypeError, ValueError) as exc:
-            # skipping a single bad record rather than aborting the whole batch
-            print(f"ingest_records skipped a record: {exc}")
+            # a real failure (unserializable data or a sqlite error) — counting it
+            # as errored and logging loudly rather than burying it in deduped
+            errored += 1
+            print(f"ingest_records errored on a record: {exc}")
             continue
 
     try:
@@ -145,8 +167,13 @@ def ingest_records(
     except sqlite3.Error as exc:
         print(f"ingest_records commit failed: {exc}")
 
-    deduped = attempted - ingested
-    return {"ingested": ingested, "deduped": deduped, "by_type": by_type}
+    deduped = attempted - ingested - errored
+    return {
+        "ingested": ingested,
+        "deduped": deduped,
+        "by_type": by_type,
+        "errored": errored,
+    }
 
 
 def _tag_to_text(tag: Any) -> str | None:

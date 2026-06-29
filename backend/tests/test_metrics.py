@@ -112,3 +112,38 @@ def test_temp_flag_no_baseline():
     flag = readiness.temp_flag(today, base)
     assert flag["flagged"] is False
     assert flag["deviation"] is None
+
+
+def test_temp_zero_baseline_is_neutral():
+    # a 0.0 temp baseline is a sentinel for "no baseline yet", not a real reading —
+    # it must NOT trip the illness flag nor zero out the temp subscore
+    base = {"temp_mean_c": {"14": 0.0, "30": 0.0}, "n_days": 0}
+    today = _summary("2026-06-16", temp=36.0)
+
+    flag = readiness.temp_flag(today, base)
+    assert flag["flagged"] is False
+    assert flag["deviation"] is None
+    assert flag["note"] == "no baseline yet"
+
+    result = readiness.compute_readiness(today, base)
+    temp_comp = result["components"]["temp"]
+    # neutral 0.5 subscore + the "no baseline yet" note, not a zeroed-out subscore
+    assert temp_comp["subscore"] == 0.5
+    assert temp_comp["note"] == "no baseline yet"
+
+
+def test_baselines_tolerate_none_date():
+    # a row with date=None must not break the defensive sort — the trailing-window
+    # means should still reflect the genuinely most-recent days
+    summaries = [
+        _summary(None, hrv=60.0, rhr=50.0, temp=36.0),
+        _summary("2026-06-01", hrv=62.0, rhr=51.0, temp=36.1),
+        _summary("2026-06-02", hrv=80.0, rhr=60.0, temp=37.0),
+    ]
+    base = baselines.compute_baselines(summaries, windows=(2, 30))
+
+    # None-date row sorts first (oldest), so the most-recent 2 are the dated rows
+    assert base["hrv_rmssd"]["2"] == 71.0
+    assert base["resting_hr"]["2"] == 55.5
+    assert abs(base["temp_mean_c"]["2"] - 36.55) < 1e-9
+    assert base["n_days"] == 3

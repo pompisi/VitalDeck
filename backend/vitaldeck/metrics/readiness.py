@@ -78,7 +78,7 @@ def _temp_subscore(value: Optional[float], baseline: Optional[float]) -> tuple[f
     an unusual dip both signal strain."""
     if value is None:
         return 0.5, "no temp reading"
-    if baseline is None:
+    if baseline is None or baseline == 0:
         return 0.5, "no baseline yet"
     dev = abs(value - baseline)
     sub = _clamp01(1.0 - dev / _TEMP_FULL_PENALTY_C)
@@ -211,7 +211,7 @@ def temp_flag(today: dict, baselines: dict) -> dict:
     value = today.get("temp_mean_c")
     base = _baseline_for(baselines if isinstance(baselines, dict) else {}, "temp_mean_c")
 
-    if value is None or base is None:
+    if value is None or base is None or base == 0:
         return {"flagged": False, "deviation": None, "note": "no baseline yet"}
 
     dev = value - base

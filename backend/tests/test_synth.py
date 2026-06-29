@@ -36,6 +36,32 @@ def test_every_canonical_type_present():
     assert not missing, f"missing canonical types: {missing}"
 
 
+def test_single_day_has_every_canonical_type():
+    # a days=1 window must still carry every canonical type (battery is the
+    # easy one to drop since it used to be gated behind rnd.random()<0.6). we
+    # check several seeds so determinism of the forced battery holds.
+    for s in (1, 2, 7, 42, 99, 123):
+        recs = synth.generate(days=1, seed=s)
+        seen = {r["type"] for r in recs}
+        missing = CANONICAL_TYPES - seen
+        assert not missing, f"seed {s}: days=1 missing canonical types: {missing}"
+
+
+def test_max_event_ms_within_window():
+    # nightly samples on the most recent day must not leak past end_ms — the
+    # final filter clamps the window. check several seeds for both short and
+    # long windows.
+    for days in (1, 30):
+        for s in (1, 2, 7, 42, 99):
+            recs = synth.generate(days=days, seed=s)
+            assert recs, f"seed {s}, days={days}: expected records"
+            max_t = max(r["t_event_ms"] for r in recs)
+            assert max_t <= synth.DEFAULT_END_MS, (
+                f"seed {s}, days={days}: max t_event_ms {max_t} leaked past "
+                f"end_ms {synth.DEFAULT_END_MS}"
+            )
+
+
 def test_envelope_shape():
     # every record is a pre-normalize envelope: t_event_ms + type + data (dict),
     # plus sess/ctr for the dedupe key.

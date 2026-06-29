@@ -105,6 +105,48 @@ def test_ingest_dedup_only_on_key_fields(conn):
     assert result2["ingested"] == 1
 
 
+def test_ingest_malformed_records_are_errored_not_deduped(conn):
+    # a record missing t_event_ms and one with a non-string type can never insert
+    # (the NOT NULL columns make INSERT OR IGNORE quietly yield rowcount 0); they
+    # must land in 'errored', never get mistaken for harmless duplicates
+    records = [
+        _rec(1000, "heart_rate", bpm=60),          # good
+        {"type": "hrv", "data": {"rmssd_ms": 40.0}},  # missing t_event_ms
+        _rec(2000, None, bpm=70),                   # non-string type
+    ]
+    result = store.ingest_records(conn, records)
+    assert result["ingested"] == 1
+    assert result["errored"] == 2
+    # the two malformed ones must NOT be counted as deduped
+    assert result["deduped"] == 0
+    # and only the good record actually landed
+    count = conn.execute("SELECT COUNT(*) AS c FROM raw_records").fetchone()["c"]
+    assert count == 1
+
+
+def test_ingest_non_serializable_data_is_errored_not_deduped(conn):
+    # data that json.dumps can't handle (a set) raises TypeError mid-insert; that
+    # record is errored + logged, not silently folded into deduped
+    bad = _rec(3000, "heart_rate")
+    bad["data"] = {"weird": {1, 2, 3}}  # sets aren't json-serializable
+    result = store.ingest_records(conn, [bad])
+    assert result["ingested"] == 0
+    assert result["errored"] == 1
+    assert result["deduped"] == 0
+    count = conn.execute("SELECT COUNT(*) AS c FROM raw_records").fetchone()["c"]
+    assert count == 0
+
+
+def test_ingest_genuine_duplicate_still_counts_as_deduped(conn):
+    # the dedupe path is unchanged: a real collision on (t_event_ms, type, sess)
+    # is deduped, with errored staying at zero
+    store.ingest_records(conn, [_rec(1000, "heart_rate", bpm=60)])
+    result = store.ingest_records(conn, [_rec(1000, "heart_rate", bpm=99)])
+    assert result["ingested"] == 0
+    assert result["deduped"] == 1
+    assert result["errored"] == 0
+
+
 def test_get_records_and_data_parsed_back(conn):
     store.ingest_records(
         conn,
