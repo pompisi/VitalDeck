@@ -164,7 +164,7 @@ export default function StatusScreen() {
           {today.error instanceof Error ? today.error.message : 'unknown error'}
         </Text>
         <Pressable style={styles.cmd} onPress={() => today.refetch()}>
-          <Text style={styles.cmdText}>> RETRY</Text>
+          <Text style={styles.cmdText}>{'> RETRY'}</Text>
         </Pressable>
       </View>
     );

@@ -107,7 +107,7 @@ export default function TrendsScreen() {
                 : 'unknown error'}
             </Text>
             <Pressable style={styles.cmd} onPress={() => trends.refetch()}>
-              <Text style={styles.cmdText}>> RETRY</Text>
+              <Text style={styles.cmdText}>{'> RETRY'}</Text>
             </Pressable>
           </View>
         ) : (

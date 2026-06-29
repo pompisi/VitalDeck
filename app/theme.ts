@@ -47,7 +47,10 @@ const amber = {
 } as const;
 
 export type PaletteName = 'green' | 'amber';
-export const palettes: Record<PaletteName, typeof green> = { green, amber };
+// each palette shares green's shape, but holds its own color strings (amber's
+// hexes differ), so widen the values to string rather than green's literals
+export type Palette = { [K in keyof typeof green]: string };
+export const palettes: Record<PaletteName, Palette> = { green, amber };
 
 // the active palette. green by default (classic Fallout); the ThemeProvider
 // swaps this for a live toggle in the next pass. screens still read `colors`.

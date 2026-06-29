@@ -80,7 +80,7 @@ export default function SleepScreen() {
           {sleep.error instanceof Error ? sleep.error.message : 'unknown error'}
         </Text>
         <Pressable style={styles.cmd} onPress={() => sleep.refetch()}>
-          <Text style={styles.cmdText}>> RETRY</Text>
+          <Text style={styles.cmdText}>{'> RETRY'}</Text>
         </Pressable>
       </View>
     );
