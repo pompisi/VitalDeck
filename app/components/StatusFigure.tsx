@@ -1,32 +1,15 @@
 // the STATUS centerpiece: the same phosphor operative from the boot screen, with
-// the live vitals pinned around it (HEART/TEMP left, HRV/SpO2 right). the figure
-// gently pulses at the actual heart rate so it reads as "alive". temp is shown in
-// Fahrenheit. the art is assets/character.png (baked phosphor-green, so no flat
-// tint — see BootSequence for the bake notes).
-import React, { useEffect } from 'react';
+// the live vitals pinned around it (HEART/TEMP left, HRV/SpO2 right). static — no
+// pulsing. temp is shown in Fahrenheit. the art is assets/character.png (baked
+// phosphor-green on a real transparent background — see BootSequence for notes).
+import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
 import { cToF } from '../lib/units';
 import { colors, font, fonts } from '../theme';
-
-const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 const fmt = (v: number | null | undefined, digits = 0): string => {
   if (v == null || Number.isNaN(v)) return '--';
   return digits > 0 ? v.toFixed(digits) : String(Math.round(v));
-};
-
-// the figure's pulse period from heart rate, clamped to a sane animation range
-const heartPeriod = (hr: number | null | undefined): number => {
-  const bpm = hr && hr > 30 ? hr : 60;
-  return Math.max(600, Math.min(1400, 60000 / bpm));
 };
 
 function Callout({
@@ -57,22 +40,6 @@ export default function StatusFigure({
   temp: number | null | undefined;
   spo2: number | null | undefined;
 }) {
-  const period = heartPeriod(hr);
-
-  // a subtle "heartbeat" scale on the whole figure, timed to the real HR
-  const beat = useSharedValue(0);
-  useEffect(() => {
-    beat.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 130, easing: Easing.out(Easing.quad) }),
-        withTiming(0, { duration: Math.max(period - 130, 220), easing: Easing.in(Easing.quad) }),
-      ),
-      -1,
-      false,
-    );
-  }, [beat, period]);
-  const figStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + beat.value * 0.03 }] }));
-
   return (
     <View style={styles.row}>
       <View style={styles.col}>
@@ -80,10 +47,10 @@ export default function StatusFigure({
         <Callout label="TEMP" value={cToF(temp)} unit="°F" digits={1} side="left" />
       </View>
 
-      <AnimatedImage
+      <Image
         source={require('../assets/character.png')}
         resizeMode="contain"
-        style={[styles.figure, figStyle]}
+        style={styles.figure}
       />
 
       <View style={styles.col}>
@@ -97,7 +64,7 @@ export default function StatusFigure({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   col: { flex: 1, justifyContent: 'space-around', height: 190, gap: 28 },
-  figure: { width: 150, height: 180 },
+  figure: { width: 140, height: 188 },
   callout: {},
   alignL: { alignItems: 'flex-start' },
   alignR: { alignItems: 'flex-end' },
