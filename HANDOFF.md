@@ -8,8 +8,14 @@ systems integration + RE-protocol data engineering. SEPARATE from MangaStacked.
 
 ## Status — WORKING ✅
 Live Oura data flows to the phone app over Tailscale; Pi auto-syncs the API twice
-daily; Android APK installed; Pip-Boy green CRT UI (STATUS / TRENDS / SLEEP / LOG);
-OTA updates working; 78 backend tests green.
+daily; Android APK installed; Pip-Boy green CRT UI (STATUS / TRENDS / SLEEP / LOG /
+SET); OTA updates working; 78 backend tests green.
+
+STATUS shows a **live-ish current heart rate**: `GET /live`
+(`oura_api.live_heartrate` → Oura `/heartrate` time series) is the ONLY intraday
+metric the Oura cloud exposes; the app polls it every 60s. HRV / SpO2 / temp / sleep
+are nightly-only from the cloud — true real-time for those needs the BLE decoder
+(parked, see VALIDATION TODO).
 
 ## Where everything lives
 - Local repo: `C:\Users\jango\OneDrive\Documents\App\vitaldeck` (git, branch `main`).
