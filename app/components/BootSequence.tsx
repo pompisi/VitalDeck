@@ -5,14 +5,12 @@
 // it stays BULLETPROOF: wrapped in an error boundary (see _layout) so a render
 // throw can't strand the UI, and the button is revealed by a timer that fires
 // even if a line-reveal hiccups.
-// character.png is a phosphor-green PNG, baked luminance-preserving from the
-// white-on-transparent original kept at assets/character_src.png (so internal
-// linework survives — a flat tintColor would flatten it to a green blob). to retheme
-// (e.g. amber for the future toggle), re-bake from character_src.png.
+// the hero is the Pompisi Studio brand mark (PompisiLogo), typed on; the app it's
+// launching (VITALDECK) sits below it. the character now lives on the STATUS screen.
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -22,8 +20,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { getApiBaseUrl } from '../lib/settings';
 import { colors, font, fonts, glow, spacing } from '../theme';
-
-const AnimatedImage = Animated.createAnimatedComponent(Image);
+import PompisiLogo from './PompisiLogo';
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const LINE_MS = 230; // per boot-log line
@@ -153,11 +150,9 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, rootStyle]}>
       <View style={styles.stack} pointerEvents="none">
-        <AnimatedImage
-          source={require('../assets/character.png')}
-          resizeMode="contain"
-          style={[styles.char, charStyle]}
-        />
+        <Animated.View style={[styles.logoWrap, charStyle]}>
+          <PompisiLogo typeOn size={32} />
+        </Animated.View>
         <Text style={styles.title}>VITALDECK</Text>
 
         <View style={styles.console}>
@@ -198,7 +193,7 @@ const styles = StyleSheet.create({
     elevation: 100,
   },
   stack: { alignItems: 'center', width: '100%', paddingHorizontal: spacing.xl },
-  char: { width: 240, height: 240 },
+  logoWrap: { marginBottom: spacing.lg },
   title: {
     color: colors.text,
     fontFamily: fonts.display,

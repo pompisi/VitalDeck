@@ -78,10 +78,13 @@ carries an honest AI-assisted-dev disclosure.
   technician, baked phosphor-green (luminance-preserving) into
   `app/assets/character.png` (white-on-transparent original kept at
   `app/assets/character_src.png` for a future amber re-bake). Shown on the
-  boot/power-on screen (`app/components/BootSequence.tsx`) AND as the STATUS
-  centerpiece (`app/components/StatusFigure.tsx` — vitals callouts + an HR-synced
-  pulse; replaced the old pixel sprite). The boot screen now WAITS for an
-  `> INITIALIZE` tap (no auto-dismiss).
+  STATUS centerpiece (`app/components/StatusFigure.tsx` — vitals callouts, static).
+  NOTE: the GPT export was actually fully opaque (checkerboard painted in as gray
+  pixels); the bake flood-keys that out from the borders before tinting (see the
+  re-bake history). The boot/power-on screen now leads with the **Pompisi Studio**
+  brand mark (`app/components/PompisiLogo.tsx` — a typed-on `> POMPISI STUDIO`
+  command-prompt wordmark in Share Tech Mono) instead of the character, then
+  VITALDECK, then the boot log; it WAITS for an `> INITIALIZE` tap (no auto-dismiss).
 - [x] **Sleep stages read 0** on STATUS — FIXED in
   `backend/vitaldeck/ingest/oura_api.py`. Field names were already correct; the
   night-picker now prefers records that actually have staging, and a
