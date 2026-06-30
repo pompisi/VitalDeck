@@ -129,7 +129,9 @@ Session-end pointers: latest OTA = update group `fee62cca` (live HR), commit `90
 - Local repo: `C:\Users\jango\OneDrive\Documents\App\vitaldeck` (git, branch `main`).
 - GitHub (public): https://github.com/pompisi/VitalDeck
 - On the Pi: `~/vitaldeck` (cloned from GitHub); systemd service `vitaldeck` on :8000.
-- Docs: `README.md`, `docs/WALKTHROUGH.md` (interview-defense), `docs/ARCHITECTURE.md`,
+- Docs: `README.md`, `docs/CAVEMAN_GUIDE.md` (plain-language explainer of the whole
+  system + every repo file — for non-technical readers / interview prep),
+  `docs/WALKTHROUGH.md` (interview-defense), `docs/ARCHITECTURE.md`,
   `docs/PHASE0_RUNBOOK.md`, `docs/SAMSUNG_SNOOP_FINDING.md`, `CONTRACTS.md`.
 
 ## Infra / access

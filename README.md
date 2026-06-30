@@ -23,6 +23,10 @@ baselines/readiness math. It's a **batch** tool at heart — nightly metrics
 (HRV/SpO2/temp/sleep) update once a day — with one live exception: current heart
 rate, the only metric Oura exposes intraday.
 
+> **New here / not technical?** Read [`docs/CAVEMAN_GUIDE.md`](docs/CAVEMAN_GUIDE.md)
+> first — it explains the entire system *and every file in the repo* in plain
+> language, no tech knowledge required (think butler, filing cabinet, walkie-talkie).
+
 ---
 
 ## Locked decisions
