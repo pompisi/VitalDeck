@@ -4,6 +4,7 @@
 import type {
   ApiResult,
   HealthResponse,
+  HeartrateDayResponse,
   LiveResponse,
   MetricsResponse,
   NewTag,
@@ -76,6 +77,10 @@ export const getHealth = () => request<HealthResponse>('/health');
 // live-ish current heart rate (polled from STATUS). /live always returns 200 — bpm
 // is null with an `error` when unavailable — so unwrap won't throw on "no data".
 export const getLive = () => unwrap(request<LiveResponse>('/live'));
+
+// one local day's daytime HR curve (always-200; bpm points empty when unavailable)
+export const getHeartrateDay = (date?: string) =>
+  unwrap(request<HeartrateDayResponse>(`/heartrate/day${date ? `?date=${encodeURIComponent(date)}` : ''}`));
 
 export const getToday = () => unwrap(request<SummaryResponse>('/summary/today'));
 

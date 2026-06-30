@@ -107,6 +107,10 @@ export interface SleepSession {
   // API exposes the parsed stages_json column as `stages` (the hypnogram timeline)
   stages?: SleepStage[] | string | null;
   stages_json?: SleepStage[] | string | null;
+  // overnight HR/HRV/movement curves (parsed from series_json → `series`)
+  series?: SleepSeries | string | null;
+  restless_periods?: number | null;
+  rem_latency_min?: number | null;
 }
 
 export interface SleepResponse {
@@ -147,6 +151,33 @@ export interface SyncResponse {
   deduped: number;
   data_as_of: number | null;
   mode: 'live' | 'synthetic' | 'oura';
+}
+
+// overnight time-series curves (from the /sleep record): a compact block per metric
+export interface SeriesBlock {
+  t0_ms: number;
+  interval_s: number;
+  values: (number | null)[];
+}
+export interface SleepSeries {
+  hr?: SeriesBlock;
+  hrv?: SeriesBlock;
+  movement?: string;
+}
+
+// one local day's daytime HR curve (5-min buckets) from GET /heartrate/day
+export interface HeartratePoint {
+  ts_ms: number;
+  bpm: number;
+}
+export interface HeartrateDayResponse {
+  ok: boolean;
+  points: HeartratePoint[];
+  min: number | null;
+  max: number | null;
+  avg: number | null;
+  count?: number | null;
+  error?: string | null;
 }
 
 // live-ish current heart rate (the only intraday metric the Oura cloud exposes).

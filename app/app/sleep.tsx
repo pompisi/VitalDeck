@@ -17,9 +17,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Hypnogram from '../components/Hypnogram';
+import MetricCurve, { seriesToPoints } from '../components/MetricCurve';
 import { Panel, ScreenHeader } from '../components/Pip';
 import { getSleep, getSummary } from '../lib/api';
-import type { SleepSession, SleepStage } from '../lib/types';
+import type { SleepSeries, SleepSession, SleepStage } from '../lib/types';
 import { cToF } from '../lib/units';
 import { colors, font, fonts, glow, scoreColor, spacing } from '../theme';
 
@@ -85,10 +86,23 @@ const parseStageList = (raw: SleepStage[] | string | null | undefined): SleepSta
   return raw;
 };
 
+const parseSeries = (raw: SleepSeries | string | null | undefined): SleepSeries | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as SleepSeries;
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+};
+
 export default function SleepScreen() {
   const insets = useSafeAreaInsets();
   const sleep = useQuery({ queryKey: ['sleep', 30], queryFn: () => getSleep(30) });
   const [selDate, setSelDate] = useState<string | null>(null);
+  const [curve, setCurve] = useState<'hr' | 'hrv'>('hr');
 
   const sessions = useMemo(
     () => [...(sleep.data?.sessions ?? [])].sort((a, b) => b.end_ms - a.end_ms),
@@ -145,6 +159,10 @@ export default function SleepScreen() {
   const inBed = asleep + stageMin.awake;
   const pct = (x: number) => (asleep > 0 ? Math.round((x / asleep) * 100) : 0);
   const stageList = parseStageList(selected.stages ?? selected.stages_json);
+  const series = parseSeries(selected.series);
+  const curveBlock = curve === 'hr' ? series?.hr : series?.hrv;
+  const curvePts = seriesToPoints(curveBlock);
+  const curveVals = curvePts.filter((p) => p.value != null).map((p) => p.value as number);
 
   const summ = day.data?.summary;
   const readiness = day.data?.metric?.readiness_custom ?? null;
@@ -192,6 +210,43 @@ export default function SleepScreen() {
           <View style={styles.statDivider} />
           <Stat label="LATENCY" value={selected.latency_min != null ? `${Math.round(selected.latency_min)}M` : '--'} />
         </View>
+
+        {series?.hr || series?.hrv ? (
+          <View style={styles.curveWrap}>
+            <View style={styles.curveHead}>
+              <Text style={styles.curveTitle}>OVERNIGHT</Text>
+              <View style={styles.curveChips}>
+                {(['hr', 'hrv'] as const).map((k) =>
+                  (k === 'hr' ? series?.hr : series?.hrv) ? (
+                    <Pressable
+                      key={k}
+                      onPress={() => setCurve(k)}
+                      style={[styles.curveChip, curve === k && styles.curveChipActive]}
+                    >
+                      <Text style={[styles.curveChipText, curve === k && styles.curveChipTextActive]}>
+                        {k.toUpperCase()}
+                      </Text>
+                    </Pressable>
+                  ) : null,
+                )}
+              </View>
+            </View>
+            <MetricCurve
+              points={curvePts}
+              width={chartW}
+              tint={curve === 'hr' ? colors.rhr : colors.hrv}
+              startMs={selected.start_ms}
+              endMs={selected.end_ms}
+            />
+            <View style={styles.curveStats}>
+              <Text style={styles.curveStat}>MIN {curveVals.length ? Math.round(Math.min(...curveVals)) : '--'}</Text>
+              <Text style={styles.curveStat}>
+                AVG {curveVals.length ? Math.round(curveVals.reduce((a, b) => a + b, 0) / curveVals.length) : '--'}
+              </Text>
+              <Text style={styles.curveStat}>MAX {curveVals.length ? Math.round(Math.max(...curveVals)) : '--'}</Text>
+            </View>
+          </View>
+        ) : null}
 
         {stageList.length > 0 ? (
           <View style={styles.graphWrap}>
@@ -325,6 +380,16 @@ const styles = StyleSheet.create({
   statDivider: { width: 1, alignSelf: 'stretch', backgroundColor: colors.border },
 
   graphWrap: { marginTop: spacing.sm },
+  curveWrap: { marginTop: spacing.md },
+  curveHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  curveTitle: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 2 },
+  curveChips: { flexDirection: 'row', gap: spacing.xs },
+  curveChip: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  curveChipActive: { borderColor: colors.text, backgroundColor: colors.surfaceAlt },
+  curveChipText: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1 },
+  curveChipTextActive: { color: colors.text },
+  curveStats: { flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.xs },
+  curveStat: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1 },
   barTrack: {
     flexDirection: 'row',
     height: 18,

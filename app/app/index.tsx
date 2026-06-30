@@ -5,13 +5,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import LiveBadge from '../components/LiveBadge';
+import MetricCurve from '../components/MetricCurve';
 import StatusFigure from '../components/StatusFigure';
 import Ticker from '../components/Ticker';
-import { getLive, getToday, postSync } from '../lib/api';
+import { getHeartrateDay, getLive, getToday, postSync } from '../lib/api';
 import { getApiBaseUrl } from '../lib/settings';
 import { cToF } from '../lib/units';
 import type { ReadinessComponent, StageBreakdown } from '../lib/types';
@@ -122,6 +123,17 @@ export default function StatusScreen() {
     staleTime: 20_000,
   });
 
+  // the day's daytime HR curve (5-min buckets); refreshes a bit slower than live
+  const hrDay = useQuery({
+    queryKey: ['hrday'],
+    queryFn: () => getHeartrateDay(),
+    refetchInterval: 120_000,
+    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+  });
+
+  const chartW = Dimensions.get('window').width - spacing.lg * 2 - spacing.md * 2;
+
   const SyncButton = (
     <Pressable
       style={[styles.cmd, sync.isPending && styles.cmdBusy]}
@@ -186,6 +198,7 @@ export default function StatusScreen() {
     live.data?.ts_ms != null &&
     Date.now() - live.data.ts_ms < 30 * 60 * 1000;
   const heartHr = liveBpm ?? summary?.resting_hr;
+  const hrDayPts = (hrDay.data?.points ?? []).map((p) => ({ tsMs: p.ts_ms, value: p.bpm }));
 
   const n0 = (v: number | null | undefined): string =>
     v == null || Number.isNaN(v) ? '--' : String(Math.round(v));
@@ -233,6 +246,17 @@ export default function StatusScreen() {
       />
 
       <Ticker items={tickerItems} />
+
+      {hrDayPts.filter((p) => p.value != null).length > 1 ? (
+        <Panel title="DAYTIME HEART RATE">
+          <MetricCurve points={hrDayPts} width={chartW} tint={colors.rhr} />
+          <View style={styles.hrDayStats}>
+            <Text style={styles.hrDayStat}>MIN {hrDay.data?.min ?? '--'}</Text>
+            <Text style={styles.hrDayStat}>AVG {hrDay.data?.avg ?? '--'}</Text>
+            <Text style={styles.hrDayStat}>MAX {hrDay.data?.max ?? '--'}</Text>
+          </View>
+        </Panel>
+      ) : null}
 
       {/* HP-style condition bar */}
       <View style={styles.condRow}>
@@ -347,6 +371,8 @@ const styles = StyleSheet.create({
   restStages: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
   restStage: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1 },
   restHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
+  hrDayStats: { flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.sm },
+  hrDayStat: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1 },
 
   cmd: {
     borderWidth: 1,
