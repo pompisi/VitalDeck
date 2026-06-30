@@ -34,10 +34,18 @@ Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Don
   VERSION now shows on boot + SETTINGS from `app/lib/version.ts` — bump `APP_VERSION`
   each drop; `buildTag()` auto-changes per OTA (from `expo-updates` updateId). Do NOT
   bump app.json `version` (it's tied to runtimeVersion → would break OTA delivery).
+- **App drop 3 (APP_VERSION 0.4.0):** unified DAY-DETAIL route
+  `app/app/day/[date].tsx` (hidden `day/[date]` route; reads `useLocalSearchParams` +
+  `getSummary(date)`; `ReadinessRing` + `ContributorBars` + vitals grid + REST tile —
+  one lens for any day) + `app/components/MonthCalendar.tsx` (6-week readiness heatmap,
+  `scoreColor` dots from `/metrics`, tap → day route). Wired from STATUS (CONDITION
+  block), SLEEP ("THAT DAY" panel + a HISTORY calendar). Pure frontend — no backend
+  change. Extracted the readiness contributor bars into shared
+  `app/components/ContributorBars.tsx` (used by readiness + day-detail). Dynamic
+  `/day/{date}` pushes cast `as Href` (typed routes lag new routes — same gotcha).
 
 ### Next in the wave (not yet built)
-Unified day-detail route (`app/app/day/[date].tsx`, href:null) + month `MonthCalendar`;
-sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
+Sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
 explainable SLEEP breakdown `metrics/sleep.py`); ACTIVITY tab (score+rings+MET curve);
 vitals (SpO2 range, resp/resting-HR trends); stress/recovery (`/daily_stress`);
 tags-on-trends; then the **live green⇄amber toggle** — the theme *foundation* was

@@ -5,6 +5,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
+import { useRouter, type Href } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,8 +19,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Hypnogram from '../components/Hypnogram';
 import MetricCurve, { seriesToPoints } from '../components/MetricCurve';
+import MonthCalendar from '../components/MonthCalendar';
 import { Panel, ScreenHeader } from '../components/Pip';
-import { getSleep, getSummary } from '../lib/api';
+import { getMetrics, getSleep, getSummary } from '../lib/api';
 import type { SleepSeries, SleepSession, SleepStage } from '../lib/types';
 import { cToF } from '../lib/units';
 import { colors, font, fonts, glow, scoreColor, spacing } from '../theme';
@@ -100,7 +102,10 @@ const parseSeries = (raw: SleepSeries | string | null | undefined): SleepSeries 
 
 export default function SleepScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const sleep = useQuery({ queryKey: ['sleep', 30], queryFn: () => getSleep(30) });
+  // per-day readiness for the history heatmap (no new endpoint — reuses /metrics)
+  const metrics = useQuery({ queryKey: ['metrics', 42], queryFn: () => getMetrics(42) });
   const [selDate, setSelDate] = useState<string | null>(null);
   const [curve, setCurve] = useState<'hr' | 'hrv'>('hr');
 
@@ -289,18 +294,31 @@ export default function SleepScreen() {
         </View>
       </Panel>
 
-      <Panel title="THAT DAY">
-        {day.isLoading ? (
-          <Text style={styles.dim}>READING…</Text>
+      <Pressable onPress={() => router.push(('/day/' + selected.date) as Href)}>
+        <Panel title="THAT DAY">
+          {day.isLoading ? (
+            <Text style={styles.dim}>READING…</Text>
+          ) : (
+            <View style={styles.metricGrid}>
+              <Metric label="READINESS" value={readiness != null ? String(Math.round(readiness)) : '--'} color={scoreColor(readiness)} />
+              <Metric label="RESTING HR" value={n0(summ?.resting_hr)} unit="BPM" />
+              <Metric label="HRV" value={n0(summ?.hrv_rmssd)} unit="MS" />
+              <Metric label="SKIN TEMP" value={tempF != null ? tempF.toFixed(1) : '--'} unit="°F" />
+              <Metric label="SpO2" value={n0(summ?.spo2_avg)} unit="%" />
+              <Metric label="RESP" value={n0(summ?.resp_rate)} unit="BR/M" />
+            </View>
+          )}
+          <Text style={styles.dayHint}>TAP FOR FULL DAY DETAIL ›</Text>
+        </Panel>
+      </Pressable>
+
+      <Panel title="HISTORY">
+        {metrics.isLoading ? (
+          <Text style={styles.dim}>READING ARCHIVE…</Text>
+        ) : metrics.data?.points?.length ? (
+          <MonthCalendar points={metrics.data.points} onPick={(d) => router.push(('/day/' + d) as Href)} />
         ) : (
-          <View style={styles.metricGrid}>
-            <Metric label="READINESS" value={readiness != null ? String(Math.round(readiness)) : '--'} color={scoreColor(readiness)} />
-            <Metric label="RESTING HR" value={n0(summ?.resting_hr)} unit="BPM" />
-            <Metric label="HRV" value={n0(summ?.hrv_rmssd)} unit="MS" />
-            <Metric label="SKIN TEMP" value={tempF != null ? tempF.toFixed(1) : '--'} unit="°F" />
-            <Metric label="SpO2" value={n0(summ?.spo2_avg)} unit="%" />
-            <Metric label="RESP" value={n0(summ?.resp_rate)} unit="BR/M" />
-          </View>
+          <Text style={styles.dim}>NO HISTORY YET</Text>
         )}
       </Panel>
     </ScrollView>
@@ -411,6 +429,7 @@ const styles = StyleSheet.create({
   legMin: { color: colors.text, fontSize: font.small, width: 64, textAlign: 'right', letterSpacing: 1 },
   legPct: { color: colors.textDim, fontSize: font.tiny, width: 38, textAlign: 'right' },
 
+  dayHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   metric: { width: '33.33%', paddingVertical: spacing.sm },
   metricValue: { color: colors.text, fontFamily: fonts.display, fontSize: 28, lineHeight: 30 },

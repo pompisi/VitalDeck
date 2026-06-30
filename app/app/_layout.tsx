@@ -125,6 +125,7 @@ export default function RootLayout() {
             />
             {/* detail routes — reachable via router.push, hidden from the tab bar */}
             <Tabs.Screen name="readiness" options={{ href: null }} />
+            <Tabs.Screen name="day/[date]" options={{ href: null }} />
           </Tabs>
           {/* scanlines sit above the boot overlay too, so the CRT look is unbroken */}
           {booting ? (

@@ -8,43 +8,14 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ExplainNote from '../components/ExplainNote';
-import { Bar, Panel } from '../components/Pip';
+import ContributorBars from '../components/ContributorBars';
+import { Panel } from '../components/Pip';
 import ReadinessRing from '../components/ReadinessRing';
 import { getToday } from '../lib/api';
-import type { ReadinessComponent } from '../lib/types';
-import { cToF } from '../lib/units';
 import { colors, font, fonts, glow, scoreColor, spacing } from '../theme';
 
 const conditionWord = (s: number | null): string =>
   s == null ? 'NO DATA' : s >= 75 ? 'OPTIMAL' : s >= 50 ? 'FAIR' : s >= 25 ? 'STRAINED' : 'CRITICAL';
-
-type Meta = { key: 'hrv' | 'resting_hr' | 'temp' | 'sleep'; label: string; unit: string; digits: number; temp?: boolean };
-const CONTRIB: Meta[] = [
-  { key: 'hrv', label: 'HRV', unit: 'MS', digits: 0 },
-  { key: 'resting_hr', label: 'RESTING HR', unit: 'BPM', digits: 0 },
-  { key: 'temp', label: 'SKIN TEMP', unit: '°F', digits: 1, temp: true },
-  { key: 'sleep', label: 'SLEEP', unit: 'MIN', digits: 0 },
-];
-
-function Contributor({ c, meta }: { c?: ReadinessComponent; meta: Meta }) {
-  if (!c) return null;
-  const sub = typeof c.subscore === 'number' ? c.subscore : 0.5;
-  const col = scoreColor(sub * 100);
-  const val = meta.temp ? cToF(c.value ?? null) : c.value ?? null;
-  const base = meta.temp ? cToF(c.baseline ?? null) : c.baseline ?? null;
-  return (
-    <View style={styles.cRow}>
-      <View style={styles.cHead}>
-        <Text style={styles.cLabel}>{meta.label}</Text>
-        <Text style={styles.cWeight}>×{typeof c.weight === 'number' ? c.weight.toFixed(2) : '--'}</Text>
-        <Text style={[styles.cPct, { color: col }]}>{Math.round(sub * 100)}</Text>
-      </View>
-      <Bar value={sub} color={col} />
-      <ExplainNote note={c.note} value={val} baseline={base} subscore={sub} unit={meta.unit} digits={meta.digits} />
-    </View>
-  );
-}
 
 export default function ReadinessScreen() {
   const insets = useSafeAreaInsets();
@@ -98,9 +69,7 @@ export default function ReadinessScreen() {
           ) : null}
 
           <Panel title="CONTRIBUTORS">
-            {CONTRIB.map((m) => (
-              <Contributor key={m.key} c={comps?.[m.key]} meta={m} />
-            ))}
+            <ContributorBars components={comps} />
           </Panel>
         </>
       )}
@@ -134,10 +103,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   flagText: { color: colors.bad, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1, flexShrink: 1 },
-
-  cRow: { marginVertical: spacing.sm },
-  cHead: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, marginBottom: 4 },
-  cLabel: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.small, letterSpacing: 1, flex: 1 },
-  cWeight: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny },
-  cPct: { fontFamily: fonts.display, fontSize: font.title },
 });

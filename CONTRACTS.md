@@ -266,9 +266,24 @@ Screens (expo-router, `app/`) and tabs:
   live-ish current HR + a LIVE badge, a device-local 12h clock, a scrolling status
   ticker, and a terminal-style SYNC command (POST /sync).
 - `trends.tsx` → **TRENDS**: metric picker + line chart with baseline band.
-- `sleep.tsx` → **SLEEP**: stage breakdown.
+- `sleep.tsx` → **SLEEP**: per-night explorer (day strip, hypnogram, overnight
+  HR/HRV curve, stage breakdown) + a **HISTORY** `MonthCalendar` (6-week readiness
+  heatmap) and a "THAT DAY → full detail" link, both pushing the day route.
 - `tags.tsx` → **LOG**: tag list + add.
 - `settings.tsx` → **SET**: API base url, STATUS character toggle, boot-sound toggle.
+- Hidden detail routes (no tab; reached via `router.push`, registered
+  `<Tabs.Screen … options={{href:null}}/>`):
+  - `readiness.tsx` → **READINESS**: ring hero + condition word + biggest-drag
+    explanation + temp flag + the four explainable contributors (`ContributorBars`).
+  - `day/[date].tsx` → **DAY DETAIL**: one consistent per-day lens for any date —
+    reads `useLocalSearchParams` + `getSummary(date)`, composes `ReadinessRing` +
+    `ContributorBars` + a vitals grid + REST tile. Entry points: STATUS condition
+    block, SLEEP "THAT DAY" panel + history calendar. No new endpoint
+    (`/summary/{date}` already carries the enriched metric; the calendar dots come
+    from `/metrics`). Dynamic pushes are cast `as Href` (typed routes lag new routes).
+- Shared: `components/ContributorBars.tsx` (the four readiness contributor bars,
+  used by both readiness + day-detail) and `components/MonthCalendar.tsx`
+  (`scoreColor`-tinted day dots; `onPick(date)` → day route).
 - `_layout.tsx`: QueryClientProvider + tab nav + an animated boot/power-on
   sequence (the "Pompisi Studio" command-prompt logo types on, then an INITIALIZE
   button) and a CRT scanline/vignette overlay.

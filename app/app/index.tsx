@@ -184,7 +184,7 @@ export default function StatusScreen() {
     );
   }
 
-  const { summary, metric, data_as_of } = today.data;
+  const { date, summary, metric, data_as_of } = today.data;
   const stages = parseStages(summary?.stage_breakdown ?? summary?.stage_breakdown_json);
   const comps = metric?.components;
   const score = metric?.readiness_custom ?? null;
@@ -258,15 +258,18 @@ export default function StatusScreen() {
         </Panel>
       ) : null}
 
-      {/* HP-style condition bar */}
-      <View style={styles.condRow}>
-        <Text style={styles.condLabel}>CONDITION</Text>
-        <Text style={[styles.condScore, { color: tint }, glow(tint, 10)]}>
-          {score != null ? Math.round(score) : '--'}
-        </Text>
-        <Text style={[styles.condWord, { color: tint }]}>{conditionWord(score)}</Text>
-      </View>
-      <Bar value={(score ?? 0) / 100} color={tint} />
+      {/* HP-style condition bar — tap to open this day's full detail */}
+      <Pressable onPress={() => router.push(('/day/' + date) as Href)}>
+        <View style={styles.condRow}>
+          <Text style={styles.condLabel}>CONDITION</Text>
+          <Text style={[styles.condScore, { color: tint }, glow(tint, 10)]}>
+            {score != null ? Math.round(score) : '--'}
+          </Text>
+          <Text style={[styles.condWord, { color: tint }]}>{conditionWord(score)}</Text>
+        </View>
+        <Bar value={(score ?? 0) / 100} color={tint} />
+        <Text style={styles.dayHint}>TAP FOR FULL DAY DETAIL ›</Text>
+      </Pressable>
 
       {comps ? (
         <Pressable onPress={() => router.push('/readiness' as Href)}>
@@ -374,6 +377,7 @@ const styles = StyleSheet.create({
   restStages: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
   restStage: { color: colors.textFaint, fontSize: font.tiny, letterSpacing: 1 },
   restHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
+  dayHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
   hrDayStats: { flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.sm },
   hrDayStat: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1 },
 
