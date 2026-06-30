@@ -21,6 +21,7 @@ from vitaldeck import summarize
 from vitaldeck.db import store
 from vitaldeck.metrics import baselines as baselines_mod
 from vitaldeck.metrics import readiness as readiness_mod
+from vitaldeck.metrics import sleep as sleep_mod
 
 from .models import (
     DeleteResponse,
@@ -307,7 +308,10 @@ def trends(metric: str = "hrv_rmssd", days: int = 30) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @app.get("/sleep", response_model=SleepResponse)
 def sleep(days: int = 30) -> dict[str, Any]:
-    """recent sleep sessions, each already a plain dict from the store."""
+    """recent sleep sessions, each already a plain dict from the store. each session
+    is enriched server-side with an explainable `quality` breakdown (our own sleep
+    score, never oura's) — computed on read so no schema/migration is needed. the
+    timing component is judged against your recent typical bedtime over this window."""
     days = max(1, min(days, 365))
     with _conn() as conn:
         try:
@@ -315,6 +319,16 @@ def sleep(days: int = 30) -> dict[str, Any]:
         except Exception as exc:
             print(f"[api] get_sleep_sessions failed: {exc}")
             sessions = []
+    # one bedtime baseline (circular mean) across the window, then score each night
+    try:
+        bt_base = sleep_mod.bedtime_baseline(sessions)
+        for s in sessions:
+            try:
+                s["quality"] = sleep_mod.compute_sleep_quality(s, bt_base)
+            except Exception as exc:
+                print(f"[api] sleep quality for {s.get('date')} failed: {exc}")
+    except Exception as exc:
+        print(f"[api] sleep quality enrich failed: {exc}")
     return {"sessions": sessions}
 
 

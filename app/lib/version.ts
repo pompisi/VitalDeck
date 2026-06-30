@@ -5,7 +5,7 @@
 // reflects each change even between manual bumps.
 import * as Updates from 'expo-updates';
 
-export const APP_VERSION = '0.4.1';
+export const APP_VERSION = '0.5.0';
 
 export function buildTag(): string {
   try {

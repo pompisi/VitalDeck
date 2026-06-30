@@ -17,12 +17,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import BarBreakdown, { type BreakdownRow } from '../components/BarBreakdown';
 import Hypnogram from '../components/Hypnogram';
 import MetricCurve, { seriesToPoints } from '../components/MetricCurve';
 import MonthCalendar from '../components/MonthCalendar';
 import { Panel, ScreenHeader } from '../components/Pip';
+import ReadinessRing from '../components/ReadinessRing';
 import { getMetrics, getSleep, getSummary } from '../lib/api';
-import type { SleepSeries, SleepSession, SleepStage } from '../lib/types';
+import type { ReadinessComponent, SleepSeries, SleepSession, SleepStage } from '../lib/types';
 import { cToF } from '../lib/units';
 import { colors, font, fonts, glow, scoreColor, spacing } from '../theme';
 
@@ -100,6 +102,31 @@ const parseSeries = (raw: SleepSeries | string | null | undefined): SleepSeries 
   return raw;
 };
 
+// sleep-quality condition word, scaled to our 0-100 sleep score (distinct wording
+// from readiness so the two aren't confused)
+const sleepWord = (s: number | null | undefined): string =>
+  s == null ? 'NO DATA' : s >= 80 ? 'RESTORATIVE' : s >= 60 ? 'ADEQUATE' : s >= 40 ? 'DISRUPTED' : 'POOR';
+
+// map a readiness-shaped component onto a generic breakdown row for BarBreakdown
+const compRow = (label: string, c: ReadinessComponent | undefined, unit?: string, digits = 0): BreakdownRow => ({
+  label,
+  subscore: typeof c?.subscore === 'number' ? c.subscore : 0.5,
+  weight: c?.weight,
+  note: c?.note,
+  value: c?.value ?? null,
+  baseline: c?.baseline ?? null,
+  unit,
+  digits,
+});
+
+const dayNum = (raw: string): string => {
+  try {
+    return format(parseISO(raw), 'd');
+  } catch {
+    return '';
+  }
+};
+
 export default function SleepScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -111,6 +138,16 @@ export default function SleepScreen() {
 
   const sessions = useMemo(
     () => [...(sleep.data?.sessions ?? [])].sort((a, b) => b.end_ms - a.end_ms),
+    [sleep.data],
+  );
+  // last ~14 nights of our sleep score, oldest→newest, for the history strip
+  const scoreHistory = useMemo(
+    () =>
+      [...(sleep.data?.sessions ?? [])]
+        .filter((s) => s.quality?.score != null)
+        .sort((a, b) => a.end_ms - b.end_ms)
+        .slice(-14)
+        .map((s) => ({ date: s.date, score: s.quality!.score as number })),
     [sleep.data],
   );
   const selected = sessions.find((s) => s.date === selDate) ?? sessions[0] ?? null;
@@ -168,6 +205,22 @@ export default function SleepScreen() {
   const curveBlock = curve === 'hr' ? series?.hr : series?.hrv;
   const curvePts = seriesToPoints(curveBlock);
   const curveVals = curvePts.filter((p) => p.value != null).map((p) => p.value as number);
+
+  const quality = selected.quality ?? null;
+  const qualityRows: BreakdownRow[] = quality
+    ? [
+        compRow('DURATION', quality.components.duration, 'MIN'),
+        compRow('EFFICIENCY', quality.components.efficiency, '%'),
+        compRow('RESTFULNESS', quality.components.restfulness),
+        compRow('TIMING', quality.components.timing),
+      ]
+    : [];
+  let bedtimeStr = '--';
+  try {
+    bedtimeStr = format(new Date(selected.start_ms), 'h:mm a');
+  } catch {
+    // leave the placeholder
+  }
 
   const summ = day.data?.summary;
   const readiness = day.data?.metric?.readiness_custom ?? null;
@@ -255,7 +308,13 @@ export default function SleepScreen() {
 
         {stageList.length > 0 ? (
           <View style={styles.graphWrap}>
-            <Hypnogram stages={stageList} width={chartW} startMs={selected.start_ms} endMs={selected.end_ms} />
+            <Hypnogram
+              stages={stageList}
+              width={chartW}
+              startMs={selected.start_ms}
+              endMs={selected.end_ms}
+              movement={series?.movement}
+            />
           </View>
         ) : (
           <View style={styles.barTrack}>
@@ -294,6 +353,53 @@ export default function SleepScreen() {
         </View>
       </Panel>
 
+      {quality ? (
+        <Panel title="SLEEP QUALITY">
+          <View style={styles.qualHero}>
+            <ReadinessRing score={quality.score} caption="SLEEP SCORE" size={150} />
+            <Text style={[styles.qualWord, { color: scoreColor(quality.score) }, glow(scoreColor(quality.score), 8)]}>
+              {sleepWord(quality.score)}
+            </Text>
+            {quality.explanation ? <Text style={styles.qualExplain}>{quality.explanation.toUpperCase()}</Text> : null}
+          </View>
+
+          <View style={styles.tiles}>
+            <Tile label="REM LATENCY" value={selected.rem_latency_min != null ? `${Math.round(selected.rem_latency_min)}M` : '--'} />
+            <View style={styles.tileDivider} />
+            <Tile label="RESTLESS" value={selected.restless_periods != null ? String(selected.restless_periods) : '--'} />
+            <View style={styles.tileDivider} />
+            <Tile label="BEDTIME" value={bedtimeStr} />
+          </View>
+
+          <BarBreakdown rows={qualityRows} />
+        </Panel>
+      ) : null}
+
+      {scoreHistory.length > 1 ? (
+        <Panel title="SLEEP SCORE">
+          <View style={styles.histRow}>
+            {scoreHistory.map((h) => {
+              const sel = h.date === selected.date;
+              return (
+                <Pressable key={h.date} style={styles.histCol} onPress={() => router.push(('/day/' + h.date) as Href)}>
+                  <View style={styles.histTrack}>
+                    <View
+                      style={[
+                        styles.histBar,
+                        { height: `${Math.max(6, Math.min(100, h.score))}%`, backgroundColor: scoreColor(h.score) },
+                        sel && styles.histBarSel,
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.histLabel, sel && styles.histLabelSel]}>{dayNum(h.date)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.histHint}>TAP A NIGHT FOR DETAIL ›</Text>
+        </Panel>
+      ) : null}
+
       <Pressable onPress={() => router.push(('/day/' + selected.date) as Href)}>
         <Panel title="THAT DAY">
           {day.isLoading ? (
@@ -330,6 +436,15 @@ function Stat({ label, value }: { label: string; value: string }) {
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Tile({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.tile}>
+      <Text style={styles.tileValue}>{value}</Text>
+      <Text style={styles.tileLabel}>{label}</Text>
     </View>
   );
 }
@@ -435,4 +550,21 @@ const styles = StyleSheet.create({
   metricValue: { color: colors.text, fontFamily: fonts.display, fontSize: 28, lineHeight: 30 },
   metricUnit: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: font.tiny },
   metricLabel: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: 2 },
+
+  qualHero: { alignItems: 'center', gap: spacing.sm, marginVertical: spacing.sm },
+  qualWord: { fontFamily: fonts.mono, fontSize: font.body, letterSpacing: 2 },
+  qualExplain: { color: colors.textDim, fontFamily: fonts.mono, fontSize: font.tiny, letterSpacing: 1, textAlign: 'center', paddingHorizontal: spacing.md },
+  tiles: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.sm, marginBottom: spacing.md },
+  tile: { flex: 1, alignItems: 'center' },
+  tileValue: { color: colors.text, fontFamily: fonts.display, fontSize: font.title },
+  tileLabel: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.xs },
+  tileDivider: { width: 1, alignSelf: 'stretch', backgroundColor: colors.border },
+  histRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 2 },
+  histCol: { flex: 1, alignItems: 'center', gap: 4 },
+  histTrack: { height: 48, width: '100%', justifyContent: 'flex-end', alignItems: 'center' },
+  histBar: { width: '58%', minHeight: 3, borderRadius: 1 },
+  histBarSel: { borderWidth: 1, borderColor: colors.text },
+  histLabel: { color: colors.textFaint, fontFamily: fonts.mono, fontSize: 10 },
+  histLabelSel: { color: colors.text },
+  histHint: { color: colors.textDim, fontSize: font.tiny, letterSpacing: 1, marginTop: spacing.sm, textAlign: 'right' },
 });

@@ -120,6 +120,22 @@ export interface SleepSession {
   series?: SleepSeries | string | null;
   restless_periods?: number | null;
   rem_latency_min?: number | null;
+  // our explainable sleep-quality score, enriched server-side on /sleep (never Oura's)
+  quality?: SleepQuality | null;
+}
+
+// the explainable sleep-quality breakdown (metrics/sleep.py): our own composite,
+// each component shaped like a ReadinessComponent (value/baseline/subscore/weight/note)
+export interface SleepQualityComponents {
+  duration: ReadinessComponent;
+  efficiency: ReadinessComponent;
+  restfulness: ReadinessComponent;
+  timing: ReadinessComponent;
+}
+export interface SleepQuality {
+  score: number | null;
+  components: SleepQualityComponents;
+  explanation?: string | null;
 }
 
 export interface SleepResponse {

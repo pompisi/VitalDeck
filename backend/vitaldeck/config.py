@@ -53,6 +53,15 @@ READINESS_WEIGHTS = {
     "sleep": 0.20,
 }
 
+# sleep-quality weights — its OWN explainable composite, separate from readiness
+# (the readiness guardrail forbids folding these in). must sum to 1.0.
+SLEEP_QUALITY_WEIGHTS = {
+    "duration": 0.35,
+    "efficiency": 0.25,
+    "restfulness": 0.25,
+    "timing": 0.15,
+}
+
 # rolling personal-baseline windows, in days
 BASELINE_WINDOWS = (14, 30)
 

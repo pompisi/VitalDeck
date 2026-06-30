@@ -57,9 +57,22 @@ Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Don
   we ever want true stack semantics (no tab bar on detail, back-to-exact-state), the
   idiomatic move is a root `<Stack>` with a `(tabs)` group — deferred (heavier refactor).
 
+- **App drop 4 (APP_VERSION 0.5.0):** SLEEP-DETAIL upgrade. Backend
+  `metrics/sleep.py` — our explainable SLEEP-QUALITY score (duration / efficiency /
+  restfulness / timing, mirrors readiness; weights in `config.SLEEP_QUALITY_WEIGHTS`),
+  attached per-session in `/sleep` **computed on read** (no schema/migration — the Pi
+  only needs `git pull` + restart, no resync). Frontend: a movement lane in
+  `Hypnogram` (oura `movement_30_sec`), a generic `components/BarBreakdown.tsx`, and on
+  SLEEP a SLEEP QUALITY panel (score ring + REM-latency/restless/bedtime tiles +
+  breakdown) + a SLEEP SCORE history strip (tap a night → day route). Adversarial
+  review gated it (circular-mean `[0,1440)` fix, restfulness baseline nulled, timing
+  note made a tz-agnostic deviation, movement trailing-column clamp). Honesty: the
+  shown score is OURS, never oura's sleep score.
+
 ### Next in the wave (not yet built)
-Sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
-explainable SLEEP breakdown `metrics/sleep.py`); ACTIVITY tab (score+rings+MET curve);
+ACTIVITY tab (`app/app/activity.tsx`, 6th tab: score gauge + concentric rings +
+contributor bars + steps/calories + daytime MET curve; needs `/daily_activity` column
+mapping + a Pi resync);
 vitals (SpO2 range, resp/resting-HR trends); stress/recovery (`/daily_stress`);
 tags-on-trends; then the **live green⇄amber toggle** — the theme *foundation* was
 deferred to bundle with the ~17-file `makeStyles`/`useMemo` migration (lower risk than

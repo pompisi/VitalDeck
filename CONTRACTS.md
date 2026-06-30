@@ -144,6 +144,29 @@ def temp_flag(today: dict, baselines: dict) -> dict
 #   -> {"flagged": bool, "deviation": float|None, "note": str}  (|dev|>=0.35C -> flagged)
 ```
 
+### `vitaldeck/metrics/sleep.py` — explainable SLEEP-QUALITY score
+
+A sibling to readiness: our own sleep score (never Oura's), same explainable shape.
+It is its OWN composite — deliberately NOT folded into readiness (that weight set
+stays frozen). Computed on read in `GET /sleep` (no DB column / migration).
+
+```python
+def compute_sleep_quality(session: dict, bedtime_baseline_min: float|None = None,
+                          weights=config.SLEEP_QUALITY_WEIGHTS) -> dict
+#   -> {"score": float (0-100), "components": {
+#         "duration":   {value,baseline,subscore,weight,note},
+#         "efficiency": {...}, "restfulness": {...}, "timing": {...}},
+#       "explanation": str}
+#   duration vs config.SLEEP_TARGET_MIN; efficiency vs ~90%; restfulness from
+#   restless_periods (fallback: fraction of night awake); timing = tonight's bedtime
+#   vs your recent circular-mean bedtime. subscores in [0,1]; score =
+#   round(100*sum(weight*subscore)). robust to missing fields (neutral 0.5).
+def bedtime_baseline(sessions, offset_hours=config.LOCAL_UTC_OFFSET_HOURS) -> float|None  # circular-mean clock-minute
+def local_bedtime_min(start_ms, offset_hours=...) -> float|None                            # local minute-of-day (0..1440)
+```
+`config.SLEEP_QUALITY_WEIGHTS` (duration .35 / efficiency .25 / restfulness .25 /
+timing .15) sums to 1.0.
+
 ---
 
 ## 5. `vitaldeck/ingest/decode.py` + `pull_snoop.py`  (owner: AGENT-INGEST)
@@ -208,7 +231,7 @@ in synthetic/dev).
 | `GET /summary/today`   | `{"date":str,"summary":{...},"metric":{...}|null,"data_as_of":int|null}` (latest day). The `metric` is enriched server-side with `explanation` (the "biggest drag" line) and `temp_flag` `{flagged,deviation,note}`. |
 | `GET /summary/{date}`  | same shape for a given YYYY-MM-DD (404 if absent) |
 | `GET /trends?metric=&days=30` | `{"metric":str,"points":[{"date":str,"value":float|null}],"baseline_14":float|null,"baseline_30":float|null}` ; metric ∈ {hrv_rmssd,resting_hr,temp_mean_c,sleep_min,spo2_avg,readiness_custom} (400 on unknown; baseline band only for hrv_rmssd/resting_hr/temp_mean_c) |
-| `GET /sleep?days=30`   | `{"sessions":[sleep_session_dict...]}` — each session also carries `stages` (hypnogram timeline), `series` `{hr,hrv,movement}` (overnight 5-min curves, from `series_json`), `restless_periods`, and `rem_latency_min`. |
+| `GET /sleep?days=30`   | `{"sessions":[sleep_session_dict...]}` — each session also carries `stages` (hypnogram timeline), `series` `{hr,hrv,movement}` (overnight 5-min curves + 30-sec movement string, from `series_json`), `restless_periods`, `rem_latency_min`, and `quality` (our explainable sleep-quality breakdown — `{score,components:{duration,efficiency,restfulness,timing},explanation}`, computed server-side via `metrics/sleep.py`; the `timing` component is judged against the recent circular-mean bedtime across the window). |
 | `GET /metrics?days=30` | `{"points":[{"date":str,"readiness_custom":float,"components":{...}}]}` |
 | `GET /tags?days=`      | `{"tags":[{id,ts_ms,label,note,created_at}...]}` |
 | `POST /tags`           | body `{ts_ms:int,label:str,note?:str}` -> created tag (500 if the insert fails) |
@@ -266,9 +289,14 @@ Screens (expo-router, `app/`) and tabs:
   live-ish current HR + a LIVE badge, a device-local 12h clock, a scrolling status
   ticker, and a terminal-style SYNC command (POST /sync).
 - `trends.tsx` → **TRENDS**: metric picker + line chart with baseline band.
-- `sleep.tsx` → **SLEEP**: per-night explorer (day strip, hypnogram, overnight
-  HR/HRV curve, stage breakdown) + a **HISTORY** `MonthCalendar` (6-week readiness
-  heatmap) and a "THAT DAY → full detail" link, both pushing the day route.
+- `sleep.tsx` → **SLEEP**: per-night explorer (day strip, hypnogram WITH a movement
+  lane, overnight HR/HRV curve, stage breakdown), an explainable **SLEEP QUALITY**
+  panel (our score ring + REM-latency/restless/bedtime tiles + a `BarBreakdown` of the
+  four contributors), a **SLEEP SCORE** history strip (tap a night → day route), a
+  **HISTORY** `MonthCalendar` (6-week readiness heatmap), and a "THAT DAY → full
+  detail" link — calendar / score strip / THAT-DAY all push the day route.
+  `components/BarBreakdown.tsx` is the generic data-driven contributor-bar renderer
+  (reused for sleep quality now; activity/vitals later).
 - `tags.tsx` → **LOG**: tag list + add.
 - `settings.tsx` → **SET**: API base url, STATUS character toggle, boot-sound toggle.
 - Hidden detail routes (no tab; reached via `router.push`, registered
