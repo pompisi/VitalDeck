@@ -27,6 +27,9 @@ _RESTLESS_FRAC_FULL = 0.5
 _AWAKE_FULL_FRAC = 0.25
 # a bedtime this many minutes off your usual saturates the timing penalty
 _BEDTIME_FULL_DEV_MIN = 120.0
+# a circular-mean bedtime needs a few nights to mean anything — below this the
+# timing component stays neutral (like readiness components with no baseline yet)
+_MIN_NIGHTS_FOR_BEDTIME = 5
 
 _MIN_PER_DAY = 1440.0
 
@@ -85,7 +88,11 @@ def bedtime_baseline(sessions: list[dict], offset_hours: float = config.LOCAL_UT
     if not isinstance(sessions, list):
         return None
     mins = [local_bedtime_min(s.get("start_ms"), offset_hours) for s in sessions if isinstance(s, dict)]
-    return _circular_mean_min([m for m in mins if m is not None])
+    mins = [m for m in mins if m is not None]
+    # too few nights → no trustworthy "usual bedtime"; timing stays neutral until then
+    if len(mins) < _MIN_NIGHTS_FOR_BEDTIME:
+        return None
+    return _circular_mean_min(mins)
 
 
 def _duration_sub(total_min: Optional[float]) -> tuple[float, str, Optional[float]]:
@@ -133,7 +140,7 @@ def _timing_sub(bedtime_min: Optional[float], baseline_min: Optional[float]) -> 
     if bedtime_min is None:
         return 0.5, "no bedtime", None
     if baseline_min is None:
-        return 0.5, "no bedtime baseline yet", None
+        return 0.5, "building your usual-bedtime baseline", None
     # signed minutes off your usual on the 24h circle (+ later, - earlier). we report
     # the DEVIATION, not an absolute clock, so the note can never disagree with the
     # app's device-timezone bedtime readout — and the subscore is timezone-agnostic.
