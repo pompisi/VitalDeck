@@ -43,6 +43,11 @@ Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Don
   change. Extracted the readiness contributor bars into shared
   `app/components/ContributorBars.tsx` (used by readiness + day-detail). Dynamic
   `/day/{date}` pushes cast `as Href` (typed routes lag new routes — same gotcha).
+  Shipped to `main` @ `784c600` + OTA'd (channel `preview`, runtime `0.1.0`, update
+  group `a8eba72f`, v0.4.0 / buildTag `019f16c5`). Pure frontend — the Pi was untouched.
+  An adversarial review pass gated the ship: calendar empty-day taps now disabled (no
+  dead-end 404s), the day-screen 404 state drops RETRY (offers "pick another day"),
+  and BACK falls back to `/` when there's no history.
 
 ### Next in the wave (not yet built)
 Sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
