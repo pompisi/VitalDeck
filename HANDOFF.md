@@ -68,6 +68,20 @@ Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Don
   review gated it (circular-mean `[0,1440)` fix, restfulness baseline nulled, timing
   note made a tz-agnostic deviation, movement trailing-column clamp). Honesty: the
   shown score is OURS, never oura's sleep score.
+  Shipped: backend live on Pi (`git pull` + restart, no resync), frontend OTA group
+  `a4d8570a` (v0.5.0 / buildTag `019f16eb`), `main` @ `9d8e5c5`. **Two live-data
+  calibrations** caught by curling `/sleep` on the Pi (the code review couldn't see
+  data scale): (1) oura `restless_periods` runs ~180-270/night (a count of ~30-sec
+  restless epochs), so restfulness is scored as the *fraction of the night restless*
+  (`restless/(inbed*2)`, 0.5=worst), not a flat count — the old `_RESTLESS_FULL=35`
+  pinned it to 0 every night. (2) Bedtime regularity needs history: timing stays
+  neutral ("building your usual-bedtime baseline") until ≥5 nights
+  (`_MIN_NIGHTS_FOR_BEDTIME`); the Pi currently has only ~3 nights ingested.
+  ⚠️ Observed while verifying: those 3 nights' bedtime_starts read 3:50 AM / 5:02 AM /
+  9:51 AM (local) — unusually irregular; the per-day night-picker (`oura_api._night_rank`)
+  may be grabbing nap/fragment records, OR the account's schedule really is irregular.
+  Duration/efficiency are unaffected (full ~7h records); only timing cares. Worth a
+  look when more nights are present (NOT a sleep-quality bug).
 
 ### Next in the wave (not yet built)
 ACTIVITY tab (`app/app/activity.tsx`, 6th tab: score gauge + concentric rings +
