@@ -204,10 +204,11 @@ in synthetic/dev).
 |------------------------|----------|
 | `GET /health`          | `{"status":"ok","db":bool,"data_as_of":int|null}` (data_as_of = latest_event_ms, falling back to the newest sleep-session end_ms when there are no raw_records — i.e. the oura path) |
 | `GET /live`            | `{"ok":bool,"bpm":int|null,"ts_ms":int|null,"source":str|null,"day_min":int|null,"day_max":int|null,"day_avg":int|null,"count":int|null,"error":str|null}` — current heart rate from the oura `/heartrate` series; the ONLY intraday metric. Always 200s; `bpm` is null with an `error` when no token / no recent sample. |
-| `GET /summary/today`   | `{"date":str,"summary":{...},"metric":{...}|null,"data_as_of":int|null}` (latest day) |
+| `GET /heartrate/day?date=` | `{"ok":bool,"points":[{"ts_ms":int,"bpm":int}],"min":int|null,"max":int|null,"avg":int|null,"count":int|null,"error":str|null}` — one local day's daytime HR curve (5-min buckets, sleep samples excluded). date defaults to local today. Same always-200 passthrough shape as `/live`. |
+| `GET /summary/today`   | `{"date":str,"summary":{...},"metric":{...}|null,"data_as_of":int|null}` (latest day). The `metric` is enriched server-side with `explanation` (the "biggest drag" line) and `temp_flag` `{flagged,deviation,note}`. |
 | `GET /summary/{date}`  | same shape for a given YYYY-MM-DD (404 if absent) |
 | `GET /trends?metric=&days=30` | `{"metric":str,"points":[{"date":str,"value":float|null}],"baseline_14":float|null,"baseline_30":float|null}` ; metric ∈ {hrv_rmssd,resting_hr,temp_mean_c,sleep_min,spo2_avg,readiness_custom} (400 on unknown; baseline band only for hrv_rmssd/resting_hr/temp_mean_c) |
-| `GET /sleep?days=30`   | `{"sessions":[sleep_session_dict...]}` |
+| `GET /sleep?days=30`   | `{"sessions":[sleep_session_dict...]}` — each session also carries `stages` (hypnogram timeline), `series` `{hr,hrv,movement}` (overnight 5-min curves, from `series_json`), `restless_periods`, and `rem_latency_min`. |
 | `GET /metrics?days=30` | `{"points":[{"date":str,"readiness_custom":float,"components":{...}}]}` |
 | `GET /tags?days=`      | `{"tags":[{id,ts_ms,label,note,created_at}...]}` |
 | `POST /tags`           | body `{ts_ms:int,label:str,note?:str}` -> created tag (500 if the insert fails) |

@@ -17,6 +17,34 @@ metric the Oura cloud exposes; the app polls it every 60s. HRV / SpO2 / temp / s
 are nightly-only from the cloud — true real-time for those needs the BLE decoder
 (parked, see VALIDATION TODO).
 
+## Data-viz wave — "best of Oura, our way" (in progress, 2026-06-29)
+Approved plan: `C:\Users\jango\.claude\plans\radiant-percolating-treehouse.md`.
+Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Done:
+- **Backend** (live on Pi): `/sleep` sessions now carry `series` (overnight HR/HRV
+  5-min curves + movement, from `series_json`) + `restless_periods` + `rem_latency_min`;
+  new **GET /heartrate/day** (daytime HR curve, `/live`-style passthrough); `/summary`
+  `metric` enriched server-side with `explanation` (biggest-drag) + `temp_flag`. New
+  cols added via idempotent ALTER in `store.init_db` (CREATE-IF-NOT-EXISTS won't alter
+  the Pi's existing db) — also add new cols to `store._SLEEP_COLS`/`_SUMMARY_COLS`.
+- **App drop 1:** OVERNIGHT HR/HRV curve (SLEEP, HR/HRV toggle) + DAYTIME HEART RATE
+  panel (STATUS), both via `app/components/MetricCurve.tsx` (SVG line+area).
+- **App drop 2:** readiness detail screen `app/app/readiness.tsx` (ReadinessRing +
+  contributor bars + `ExplainNote` "> WHY?"; tap STATUS "READINESS FACTORS" → it;
+  hidden route via `<Tabs.Screen name="readiness" options={{href:null}}/>`). App
+  VERSION now shows on boot + SETTINGS from `app/lib/version.ts` — bump `APP_VERSION`
+  each drop; `buildTag()` auto-changes per OTA (from `expo-updates` updateId). Do NOT
+  bump app.json `version` (it's tied to runtimeVersion → would break OTA delivery).
+
+### Next in the wave (not yet built)
+Unified day-detail route (`app/app/day/[date].tsx`, href:null) + month `MonthCalendar`;
+sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
+explainable SLEEP breakdown `metrics/sleep.py`); ACTIVITY tab (score+rings+MET curve);
+vitals (SpO2 range, resp/resting-HR trends); stress/recovery (`/daily_stress`);
+tags-on-trends; then the **live green⇄amber toggle** — the theme *foundation* was
+deferred to bundle with the ~17-file `makeStyles`/`useMemo` migration (lower risk than
+building it unused now). Charting toolkit (ChartPanel/LineChartCRT/BarBreakdown/GaugeArc)
+to be extracted as those screens need it.
+
 ## Last session — 2026-06-29 (where we left off)
 Big push, all shipped to `main` + OTA'd (channel `preview`, runtime `0.1.0`):
 - Sleep stages: hypnogram fallback + staged-night picker (deployed + verified live).
