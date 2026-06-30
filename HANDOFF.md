@@ -48,6 +48,14 @@ Porting Oura's best visualizations into our CRT style, shipped in OTA drops. Don
   An adversarial review pass gated the ship: calendar empty-day taps now disabled (no
   dead-end 404s), the day-screen 404 state drops RETRY (offers "pick another day"),
   and BACK falls back to `/` when there's no history.
+  Follow-up fix (v0.4.1, OTA group `40a1cf1f`, commit `3d74728`): detail-screen BACK
+  was snapping to STATUS — bottom-tab navigators default to `backBehavior:'firstRoute'`,
+  so "back" always went to the first tab. Set `<Tabs backBehavior="history">` so BACK
+  returns to the tab you came from (e.g. SLEEP, still scrolled to the calendar). NOTE
+  for future pushed detail screens (sleep-detail, etc.): they're registered as hidden
+  tabs, so the tab bar stays visible over them and back relies on this tab history. If
+  we ever want true stack semantics (no tab bar on detail, back-to-exact-state), the
+  idiomatic move is a root `<Stack>` with a `(tabs)` group — deferred (heavier refactor).
 
 ### Next in the wave (not yet built)
 Sleep-detail upgrade (movement lane in Hypnogram, REM-latency/restless tiles, an
