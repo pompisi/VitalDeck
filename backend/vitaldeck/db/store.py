@@ -37,6 +37,26 @@ def connect(db_path: Any = config.DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+# columns added after the initial schema shipped. CREATE TABLE IF NOT EXISTS won't
+# add columns to an existing db, so we ALTER them in idempotently (sqlite has no
+# ADD COLUMN IF NOT EXISTS — a duplicate raises OperationalError, which we swallow).
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("sleep_sessions", "series_json", "TEXT"),
+    ("sleep_sessions", "restless_periods", "INTEGER"),
+    ("sleep_sessions", "rem_latency_min", "REAL"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """idempotently add any post-initial columns to an existing db."""
+    for table, col, typ in _MIGRATIONS:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass  # column already exists — fine
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     """replaying schema.sql; idempotent because every statement is IF NOT EXISTS."""
     try:
@@ -44,6 +64,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             schema_sql = fh.read()
         conn.executescript(schema_sql)
         conn.commit()
+        _migrate(conn)
     except (OSError, sqlite3.Error) as exc:
         # surfacing the failure — a missing/broken schema is unrecoverable here
         raise RuntimeError(f"init_db failed reading {_SCHEMA_PATH}: {exc}") from exc
@@ -252,6 +273,9 @@ _SLEEP_COLS = (
     "light_min",
     "awake_min",
     "stages_json",
+    "series_json",
+    "restless_periods",
+    "rem_latency_min",
     "sync_run_id",
 )
 
@@ -319,6 +343,7 @@ _JSON_COLS = {
     "data_json",
     "stage_breakdown_json",
     "stages_json",
+    "series_json",
     "components_json",
     "baselines_json",
 }

@@ -96,3 +96,14 @@ class LiveResponse(BaseModel):
     day_avg: Optional[int] = None
     count: Optional[int] = None
     error: Optional[str] = None
+
+
+class HeartrateDayResponse(BaseModel):
+    # one local day's daytime HR curve (5-min bucketed) for the day graph.
+    ok: bool = True
+    points: list[dict[str, Any]] = []  # [{ts_ms, bpm}]
+    min: Optional[int] = None
+    max: Optional[int] = None
+    avg: Optional[int] = None
+    count: Optional[int] = None
+    error: Optional[str] = None

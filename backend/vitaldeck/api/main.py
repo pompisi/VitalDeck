@@ -25,6 +25,7 @@ from vitaldeck.metrics import readiness as readiness_mod
 from .models import (
     DeleteResponse,
     HealthResponse,
+    HeartrateDayResponse,
     LiveResponse,
     MetricsResponse,
     SleepResponse,
@@ -163,6 +164,22 @@ def live() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+@app.get("/heartrate/day", response_model=HeartrateDayResponse)
+def heartrate_day(date: Optional[str] = None) -> dict[str, Any]:
+    """one local day's daytime HR curve (5-min buckets) for the day graph. date is
+    YYYY-MM-DD (defaults to local today). same always-200 passthrough shape as /live."""
+    if not config.OURA_TOKEN:
+        return {"ok": False, "error": "no oura token configured"}
+    try:
+        from vitaldeck.ingest import oura_api
+
+        data = oura_api.day_heartrate(config.OURA_TOKEN, date)
+        return {"ok": True, "error": None, **data}
+    except Exception as exc:
+        print(f"[api] /heartrate/day failed: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # summaries
 # ---------------------------------------------------------------------------
@@ -176,6 +193,16 @@ def _summary_payload(conn: sqlite3.Connection, summary: dict[str, Any]) -> dict[
         except Exception as exc:
             print(f"[api] get_metric({date}) failed: {exc}")
             metric = None
+    # enrich the metric with the explainable "biggest drag" line + temp flag, derived
+    # server-side from the stored components/baselines (keeps the math ours + honest).
+    if metric:
+        try:
+            metric["explanation"] = readiness_mod._explain(
+                metric.get("readiness_custom") or 0, metric.get("components") or {}
+            )
+            metric["temp_flag"] = readiness_mod.temp_flag(summary, metric.get("baselines") or {})
+        except Exception as exc:
+            print(f"[api] readiness enrich for {date} failed: {exc}")
     return {
         "date": date,
         "summary": summary,

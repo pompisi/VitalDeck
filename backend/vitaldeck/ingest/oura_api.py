@@ -175,6 +175,42 @@ def fetch(token: str, days: int = 30) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+def _sample_series(block: Any) -> Optional[dict[str, Any]]:
+    """compacting an oura /sleep time-series block {interval, items, timestamp} into
+    {t0_ms, interval_s, values:[float|null]} (nulls preserved as line breaks). these
+    are the 5-min overnight HR / HRV curves. returns None when absent/empty."""
+    if not isinstance(block, dict):
+        return None
+    items = block.get("items")
+    if not isinstance(items, list) or not items:
+        return None
+    t0 = _ms(block.get("timestamp"))
+    iv = _num(block.get("interval"))
+    if t0 is None or iv is None:
+        return None
+    values = [float(x) if isinstance(x, (int, float)) else None for x in items]
+    return {"t0_ms": t0, "interval_s": int(iv), "values": values}
+
+
+def _rem_latency(phase: Any) -> Optional[float]:
+    """minutes from sleep onset (first non-awake stage) to the first REM run, read
+    off the 5-min hypnogram string. None if there's no onset or no REM."""
+    if not isinstance(phase, str) or not phase:
+        return None
+    onset = first_rem = None
+    for i, ch in enumerate(phase):
+        st = _HYPNO_STAGE.get(ch)
+        if st is None:
+            continue
+        if onset is None and st in ("deep", "light", "rem"):
+            onset = i
+        if first_rem is None and st == "rem":
+            first_rem = i
+    if onset is None or first_rem is None:
+        return None
+    return round((first_rem - onset) * 5.0, 1)
+
+
 def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     """pure mapping: oura docs -> our daily_summary + sleep_session dicts. kept
     side-effect-free so it's unit-testable without the network."""
@@ -198,6 +234,18 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
         if start_ms is None or end_ms is None:
             continue
         sm = _stage_minutes(s)
+        # overnight HR/HRV curves + 30-sec movement, compacted into one json blob
+        series: dict[str, Any] = {}
+        hr_series = _sample_series(s.get("heart_rate"))
+        hrv_series = _sample_series(s.get("hrv"))
+        if hr_series:
+            series["hr"] = hr_series
+        if hrv_series:
+            series["hrv"] = hrv_series
+        mv = s.get("movement_30_sec")
+        if isinstance(mv, str) and mv:
+            series["movement"] = mv
+        restless = _num(s.get("restless_periods"))
         sessions.append({
             "date": day,
             "start_ms": start_ms,
@@ -211,6 +259,10 @@ def build(payload: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, 
             "awake_min": sm["awake_min"],
             # populated from the 5-min hypnogram when oura provides it; else null
             "stages_json": _hypnogram_stages(s.get("sleep_phase_5_min")),
+            # the overnight curves (exposed by the API as `series`); null if absent
+            "series_json": json.dumps(series) if series else None,
+            "restless_periods": int(restless) if restless is not None else None,
+            "rem_latency_min": _rem_latency(s.get("sleep_phase_5_min")),
         })
 
     readiness = {r.get("day"): r for r in payload.get("daily_readiness", []) if r.get("day")}
@@ -354,3 +406,67 @@ def live_heartrate(token: str, window_hours: int = 6) -> dict[str, Any]:
     if not token:
         raise OuraError("no oura token configured")
     return summarize_heartrate(fetch_heartrate(token, hours=window_hours))
+
+
+# --- full-day heart-rate curve --------------------------------------------
+# the daytime HR graph: the whole local day's /heartrate samples, 5-min bucketed.
+
+
+def fetch_heartrate_day(token: str, day: Optional[str] = None) -> list[dict[str, Any]]:
+    """pulling one LOCAL day's heartrate samples. day is 'YYYY-MM-DD' (defaults to
+    local today). day boundaries use config.LOCAL_UTC_OFFSET_HOURS; today's window
+    ends at now."""
+    off = timedelta(hours=config.LOCAL_UTC_OFFSET_HOURS)
+    now = datetime.now(timezone.utc)
+    base = now + off
+    if day:
+        try:
+            base = datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            base = now + off
+    local_mid = datetime(base.year, base.month, base.day, tzinfo=timezone.utc) - off
+    start = local_mid
+    end = min(local_mid + timedelta(days=1), now)
+    params = {"start_datetime": start.isoformat(), "end_datetime": end.isoformat()}
+    return _rows(_get("heartrate", token, params))
+
+
+def summarize_heartrate_series(rows: list[dict[str, Any]], max_points: int = 288) -> dict[str, Any]:
+    """pure: bucket daytime (non-sleep) HR samples into 5-min means for a smooth
+    curve, plus min/max/avg. returns empty points when nothing's available."""
+    samples: list[tuple[int, float]] = []
+    for s in rows:
+        if s.get("source") == "sleep":
+            continue
+        bpm = _num(s.get("bpm"))
+        ms = _hr_ts_ms(s)
+        if bpm is None or ms is None:
+            continue
+        samples.append((ms, bpm))
+    if not samples:
+        return {"points": [], "min": None, "max": None, "avg": None, "count": 0}
+    buckets: dict[int, list[float]] = {}
+    for ms, bpm in samples:
+        buckets.setdefault(ms // 300_000, []).append(bpm)
+    pts = [
+        {"ts_ms": int(k * 300_000), "bpm": int(round(sum(v) / len(v)))}
+        for k, v in sorted(buckets.items())
+    ]
+    if len(pts) > max_points:
+        stride = len(pts) // max_points + 1
+        pts = pts[::stride]
+    vals = [p["bpm"] for p in pts]
+    return {
+        "points": pts,
+        "min": min(vals),
+        "max": max(vals),
+        "avg": int(round(sum(vals) / len(vals))),
+        "count": len(samples),
+    }
+
+
+def day_heartrate(token: str, day: Optional[str] = None) -> dict[str, Any]:
+    """fetch + summarize one day's HR curve. raises OuraError on network failure."""
+    if not token:
+        raise OuraError("no oura token configured")
+    return summarize_heartrate_series(fetch_heartrate_day(token, day))

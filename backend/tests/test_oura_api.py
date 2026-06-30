@@ -200,3 +200,60 @@ def test_summarize_heartrate_excludes_sleep_from_day_pool():
     out = oura_api.summarize_heartrate(rows)
     assert out["day_min"] == 70 and out["day_max"] == 70
     assert out["bpm"] == 70
+
+
+# --- overnight series + daytime curve + rem latency -------------------------
+
+
+def test_sample_series_compacts_block_and_keeps_nulls():
+    block = {"interval": 300, "timestamp": "2026-06-28T23:30:00.000+00:00", "items": [60, None, 58.5]}
+    out = oura_api._sample_series(block)
+    assert out["interval_s"] == 300
+    assert out["values"] == [60.0, None, 58.5]
+    assert out["t0_ms"] == int(
+        __import__("datetime").datetime.fromisoformat("2026-06-28T23:30:00.000+00:00").timestamp() * 1000
+    )
+    assert oura_api._sample_series(None) is None
+    assert oura_api._sample_series({"interval": 300, "items": []}) is None
+
+
+def test_rem_latency_from_hypnogram():
+    # onset at index 0 (deep), first rem at index 4 -> 4 * 5min = 20min
+    assert oura_api._rem_latency("1112 3".replace(" ", "")) == 20.0  # "11123"
+    assert oura_api._rem_latency("44441113") == 15.0  # onset idx4 (deep), rem idx7 -> 3*5
+    assert oura_api._rem_latency("1111") is None  # no rem
+    assert oura_api._rem_latency(None) is None
+
+
+def test_build_extracts_overnight_series():
+    night = {
+        "day": "2026-06-28", "type": "long_sleep",
+        "bedtime_start": "2026-06-27T23:30:00-05:00", "bedtime_end": "2026-06-28T07:00:00-05:00",
+        "total_sleep_duration": 25200, "deep_sleep_duration": 3600, "rem_sleep_duration": 3600,
+        "light_sleep_duration": 14400, "awake_time": 1200, "efficiency": 90,
+        "restless_periods": 12, "sleep_phase_5_min": "2221333",
+        "heart_rate": {"interval": 300, "timestamp": "2026-06-27T23:30:00-05:00", "items": [62, 60, None, 58]},
+        "hrv": {"interval": 300, "timestamp": "2026-06-27T23:30:00-05:00", "items": [40, 45, 50, None]},
+        "movement_30_sec": "111223",
+    }
+    s = oura_api.build({"sleep": [night]})["sleep"][0]
+    assert s["restless_periods"] == 12
+    assert s["rem_latency_min"] == 20.0  # "2221333": onset idx0 (light), first rem idx4 -> 4*5
+    series = json.loads(s["series_json"])
+    assert series["hr"]["values"] == [62.0, 60.0, None, 58.0]
+    assert series["hrv"]["interval_s"] == 300
+    assert series["movement"] == "111223"
+
+
+def test_summarize_heartrate_series_buckets_and_drops_sleep():
+    rows = [
+        {"timestamp": "2026-06-29T14:00:00.000Z", "bpm": 70, "source": "awake"},
+        {"timestamp": "2026-06-29T14:02:00.000Z", "bpm": 80, "source": "awake"},  # same 5-min bucket
+        {"timestamp": "2026-06-29T03:00:00.000Z", "bpm": 50, "source": "sleep"},  # dropped
+        {"timestamp": "2026-06-29T15:00:00.000Z", "bpm": 90, "source": "awake"},
+    ]
+    out = oura_api.summarize_heartrate_series(rows)
+    assert out["count"] == 3  # sleep sample excluded
+    assert len(out["points"]) == 2  # two 5-min buckets
+    assert out["points"][0]["bpm"] == 75  # mean of 70,80
+    assert out["min"] == 75 and out["max"] == 90

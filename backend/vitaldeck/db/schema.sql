@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS sleep_sessions (
     light_min    REAL,
     awake_min    REAL,
     stages_json  TEXT,                         -- ordered [{stage,duration_s}] hypnogram
+    series_json  TEXT,                         -- overnight curves {hr,hrv,movement}
+    restless_periods INTEGER,                  -- oura restless-period count
+    rem_latency_min  REAL,                     -- onset -> first REM (min)
     sync_run_id  INTEGER,
     UNIQUE (start_ms, end_ms)
 );
