@@ -19,8 +19,10 @@ from vitaldeck import config
 
 # efficiency at/above this reads as full marks (oura treats ~85%+ as healthy)
 _EFFICIENCY_TARGET = 90.0
-# restless periods at/above this drive the restfulness subscore to 0
-_RESTLESS_FULL = 35.0
+# oura's restless_periods is a count of ~30-sec restless epochs, so it scales with
+# night length (this user runs ~180-270/night). we judge the FRACTION of the night
+# spent restless; this fraction drives the restfulness subscore to 0.
+_RESTLESS_FRAC_FULL = 0.5
 # fraction of the night awake that drives the awake-fallback subscore to 0
 _AWAKE_FULL_FRAC = 0.25
 # a bedtime this many minutes off your usual saturates the timing penalty
@@ -107,13 +109,19 @@ def _efficiency_sub(eff: Optional[float]) -> tuple[float, str, Optional[float]]:
 def _restfulness_sub(
     restless: Optional[float], awake_min: Optional[float], inbed_min: Optional[float]
 ) -> tuple[float, str, Optional[float]]:
-    """restless periods are the primary signal (lower = calmer); when oura doesn't
-    give them, fall back to the fraction of the night spent awake."""
+    """restless periods are the primary signal (lower = calmer). oura reports them as
+    a count of ~30-sec restless epochs, so we normalize to the FRACTION of the night
+    spent restless (scale-robust across night lengths). when restless is missing, fall
+    back to the fraction of the night spent awake. baseline left null (the threshold
+    isn't a personal baseline) so the WHY line reads cleanly."""
+    if restless is not None and inbed_min and inbed_min > 0:
+        frac = restless / (inbed_min * 2.0)  # 30-sec epochs in bed
+        sub = _clamp01(1.0 - frac / _RESTLESS_FRAC_FULL)
+        return sub, f"{frac * 100:.0f}% of the night restless", None
     if restless is not None:
-        sub = _clamp01(1.0 - restless / _RESTLESS_FULL)
-        # no personal baseline for restlessness (the threshold isn't one), so leave
-        # it null — the UI then shows a clean "VALUE 12" instead of "VALUE 12 · BASE 12"
-        return sub, f"{int(round(restless))} restless periods", None
+        # no in-bed time to normalize the raw count against — stay neutral rather
+        # than apply a miscalibrated flat threshold
+        return 0.5, f"{int(round(restless))} restless periods", None
     if awake_min is not None and inbed_min and inbed_min > 0:
         frac = awake_min / inbed_min
         sub = _clamp01(1.0 - frac / _AWAKE_FULL_FRAC)
