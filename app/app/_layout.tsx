@@ -83,6 +83,11 @@ export default function RootLayout() {
         <StatusBar style="light" />
         <View style={{ flex: 1, backgroundColor: colors.bg }}>
           <Tabs
+            // "history" makes BACK from a pushed detail screen (day/[date], readiness)
+            // return to the tab you actually came from — the default "firstRoute" always
+            // snapped back to STATUS. tabs stay mounted, so SLEEP reappears at its prior
+            // scroll with the calendar still in view.
+            backBehavior="history"
             screenOptions={{
               headerShown: false,
               headerStyle: { backgroundColor: colors.bg },
