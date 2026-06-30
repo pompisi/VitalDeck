@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import LiveBadge from '../components/LiveBadge';
 import MetricCurve from '../components/MetricCurve';
 import StatusFigure from '../components/StatusFigure';
@@ -269,12 +269,15 @@ export default function StatusScreen() {
       <Bar value={(score ?? 0) / 100} color={tint} />
 
       {comps ? (
-        <Panel title="READINESS FACTORS">
-          <FactorRow label="HRV" comp={comps.hrv} />
-          <FactorRow label="RESTING HR" comp={comps.resting_hr} />
-          <FactorRow label="SKIN TEMP" comp={comps.temp} />
-          <FactorRow label="SLEEP" comp={comps.sleep} />
-        </Panel>
+        <Pressable onPress={() => router.push('/readiness' as Href)}>
+          <Panel title="READINESS FACTORS">
+            <FactorRow label="HRV" comp={comps.hrv} />
+            <FactorRow label="RESTING HR" comp={comps.resting_hr} />
+            <FactorRow label="SKIN TEMP" comp={comps.temp} />
+            <FactorRow label="SLEEP" comp={comps.sleep} />
+            <Text style={styles.restHint}>TAP FOR READINESS DETAIL ›</Text>
+          </Panel>
+        </Pressable>
       ) : null}
 
       <Pressable onPress={() => router.push('/sleep')}>

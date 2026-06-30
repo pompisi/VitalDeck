@@ -47,11 +47,20 @@ export interface ReadinessComponents {
 }
 
 // the metrics row; components/baselines parsed back to objects by the API
+export interface TempFlag {
+  flagged: boolean;
+  deviation: number | null;
+  note: string;
+}
+
 export interface Metric {
   date?: string;
   readiness_custom: number | null;
   components: ReadinessComponents;
   baselines?: Record<string, unknown>;
+  // enriched server-side on /summary: the "biggest drag" line + temp anomaly flag
+  explanation?: string | null;
+  temp_flag?: TempFlag | null;
 }
 
 export interface HealthResponse {

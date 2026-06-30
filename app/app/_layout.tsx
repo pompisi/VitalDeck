@@ -123,6 +123,8 @@ export default function RootLayout() {
               name="settings"
               options={{ title: 'SET', tabBarIcon: tabIcon('settings') }}
             />
+            {/* detail routes — reachable via router.push, hidden from the tab bar */}
+            <Tabs.Screen name="readiness" options={{ href: null }} />
           </Tabs>
           {/* scanlines sit above the boot overlay too, so the CRT look is unbroken */}
           {booting ? (

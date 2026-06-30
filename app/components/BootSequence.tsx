@@ -19,6 +19,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { getApiBaseUrl, isSoundEnabled } from '../lib/settings';
+import { versionLabel } from '../lib/version';
 import { colors, font, fonts, glow, spacing } from '../theme';
 import PompisiLogo from './PompisiLogo';
 
@@ -38,7 +39,7 @@ export default function BootSequence({ onDone }: { onDone: () => void }) {
       // keep the placeholder host
     }
     return [
-      'VITALDECK OS  v0.1.0',
+      `VITALDECK OS  v${versionLabel()}`,
       'PHOSPHOR BIOS // (C) D.POMPA',
       'INITIALIZING SENSOR ARRAY......... OK',
       'MOUNTING DATA STORE............... OK',

@@ -2,7 +2,7 @@
 // the Pi's URL, TEST it (pings /health and times it), SAVE it (persisted + triggers
 // a refetch), or RESET to the baked-in default. also a small read-only system panel.
 import { useQueryClient } from '@tanstack/react-query';
-import Constants from 'expo-constants';
+import { versionLabel } from '../lib/version';
 import React, { useState } from 'react';
 import {
   Image,
@@ -83,8 +83,6 @@ export default function SettingsScreen() {
     setSaved(false);
   };
 
-  const version = Constants.expoConfig?.version ?? '0.1.0';
-
   return (
     <ScrollView
       style={styles.scroll}
@@ -164,7 +162,7 @@ export default function SettingsScreen() {
       </Panel>
 
       <Panel title="SYSTEM">
-        <Row label="APP VERSION" value={version} />
+        <Row label="APP VERSION" value={versionLabel()} />
         <Row label="DEFAULT URL" value={DEFAULT_API_URL.replace(/^https?:\/\//, '')} />
         <Row label="THEME" value="GREEN PHOSPHOR" />
         <Text style={styles.note}>AMBER THEME TOGGLE — COMING SOON</Text>
